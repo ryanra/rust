@@ -73,7 +73,7 @@
 
 #[phase(plugin, link)]
 extern crate core;
-extern crate libc;
+#[cfg(not(rynux))]extern crate libc;
 
 // Allow testing this library
 
@@ -91,7 +91,7 @@ pub use boxed as owned;
 // Heaps provided for low-level allocation strategies
 
 pub mod heap;
-pub mod libc_heap;
+#[cfg(not(rynux))] pub mod libc_heap;
 
 // Primitive types using the heaps above
 
