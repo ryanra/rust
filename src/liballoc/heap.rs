@@ -128,7 +128,69 @@ unsafe fn closure_exchange_malloc(drop_glue: fn(*mut u8), size: uint,
     alloc as *mut u8
 }
 
-#[cfg(jemalloc)]
+#[cfg(rynux)]
+mod imp {
+
+    use core::ptr::{RawPtr, mut_null, null};
+    use core;
+
+    pub unsafe fn out_of_memory() -> ! {
+	// FIXME(#14674): This really needs to do something other than just abort
+	//                here, but any printing done must be *guaranteed* to not
+	//                allocate.
+	unsafe { core::intrinsics::abort() }
+    }
+
+    extern "C" {
+        fn malloc(size: uint) -> *mut u8;
+	
+	fn free(ptr: *mut u8);
+
+	fn realloc(ptr: *mut u8, size: uint) -> *mut u8;
+    }
+    
+    #[inline]
+    pub unsafe fn allocate(size: uint, align: uint) -> *mut u8 {
+        let ptr = malloc(size);
+        if ptr.is_null() {
+            core::intrinsics::abort()
+        }
+        ptr
+    }
+
+    #[inline]
+    pub unsafe fn reallocate(ptr: *mut u8, size: uint, align: uint,
+                             _old_size: uint) -> *mut u8 {
+        let ptr = realloc(ptr, size) as *mut u8;
+        if ptr.is_null() {
+            core::intrinsics::abort()
+        }
+        ptr
+    }
+
+    #[inline]
+    pub unsafe fn reallocate_inplace(ptr: *mut u8, size: uint, align: uint,
+                                     _old_size: uint) -> bool {
+        false
+    }
+
+    #[inline]
+    pub unsafe fn deallocate(ptr: *mut u8, _size: uint, align: uint) {
+        free(ptr);
+    }
+
+    #[inline]
+    pub fn usable_size(size: uint, align: uint) -> uint {
+        size
+    }
+
+    pub fn stats_print() {
+        
+    }
+}
+
+
+#[cfg(not(rynux), jemalloc)]
 mod imp {
     use core::option::{None, Option};
     use core::ptr::{RawPtr, mut_null, null};
@@ -269,7 +331,7 @@ mod imp {
     }
 }
 
-#[cfg(not(jemalloc), windows)]
+#[cfg(not(jemalloc), not(rynux), windows)]
 mod imp {
     use libc::{c_void, size_t};
     use core::ptr::RawPtr;

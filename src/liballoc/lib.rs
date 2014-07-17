@@ -74,7 +74,7 @@
 
 #[phase(plugin, link)]
 extern crate core;
-extern crate libc;
+#[cfg(not(rynux))]extern crate libc;
 
 // Allow testing this library
 
@@ -86,7 +86,7 @@ extern crate libc;
 // Heaps provided for low-level allocation strategies
 
 pub mod heap;
-pub mod libc_heap;
+#[cfg(not(rynux))] pub mod libc_heap;
 pub mod util;
 
 // Primitive types using the heaps above
