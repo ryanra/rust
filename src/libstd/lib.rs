@@ -127,7 +127,7 @@ extern crate alloc;
 extern crate core;
 extern crate core_collections = "collections";
 extern crate core_rand = "rand";
-extern crate core_sync = "sync";
+#[cfg(not(kernel))] extern crate core_sync = "sync";
 extern crate libc;
 extern crate rustrt;
 
@@ -143,6 +143,7 @@ extern crate rustrt;
 
 // NB: These reexports are in the order they should be listed in rustdoc
 
+pub use core::one;
 pub use core::any;
 pub use core::bool;
 pub use core::cell;
@@ -173,10 +174,10 @@ pub use core_collections::str;
 pub use core_collections::string;
 pub use core_collections::vec;
 
-pub use rustrt::c_str;
-pub use rustrt::local_data;
+#[cfg(not(kernel))] pub use rustrt::c_str;
+#[cfg(not(kernel))] pub use rustrt::local_data;
 
-pub use core_sync::comm;
+#[cfg(not(kernel))] pub use core_sync::comm;
 
 // Run tests with libgreen instead of libnative.
 //
@@ -240,23 +241,23 @@ pub mod collections;
 
 /* Tasks and communication */
 
-pub mod task;
-pub mod sync;
+#[cfg(not(kernel))] pub mod task;
+#[cfg(not(kernel))] pub mod sync;
 
 /* Runtime and platform support */
-
-pub mod c_vec;
-pub mod dynamic_lib;
-pub mod os;
+ 
+#[cfg(not(kernel))] pub mod c_vec;
+#[cfg(not(kernel))] pub mod dynamic_lib;
+#[cfg(not(kernel))] pub mod os;
 pub mod io;
-pub mod path;
+#[cfg(not(kernel))] pub mod path;
 pub mod fmt;
 
 // FIXME #7809: This shouldn't be pub, and it should be reexported under 'unstable'
 // but name resolution doesn't work without it being pub.
 #[unstable]
-pub mod rt;
-mod failure;
+#[cfg(not(kernel))] pub mod rt;
+#[cfg(not(kernel))] mod failure;
 
 // A curious inner-module that's not exported that contains the binding
 // 'std' so that macro-expanded references to std::error and such
@@ -267,13 +268,14 @@ mod std {
     pub use clone;
     pub use cmp;
     pub use hash;
-
-    pub use comm; // used for select!()
+    pub use macros;
+    
+    #[cfg(not(kernel))] pub use comm; // used for select!()
     pub use fmt; // used for any formatting strings
-    pub use io; // used for println!()
-    pub use local_data; // used for local_data_key!()
+    #[cfg(not(kernel))] pub use io; // used for println!()
+    #[cfg(not(kernel))] pub use local_data; // used for local_data_key!()
     pub use option; // used for bitflags!()
-    pub use rt; // used for fail!()
+    #[cfg(not(kernel))] pub use rt; // used for fail!()
     pub use vec; // used for vec![]
 
     // The test runner calls ::std::os::args() but really wants realstd
@@ -287,5 +289,5 @@ mod std {
 #[doc(hiden)]
 pub mod unstable {
     #[deprecated = "use std::dynamic_lib"]
-    pub use dynamic_lib;
+    #[cfg(not(kernel))] pub use dynamic_lib;
 }

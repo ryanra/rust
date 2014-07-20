@@ -13,6 +13,7 @@
 //! necessary for running libstd.
 
 // All platforms need to link to rustrt
+#[cfg(not(kernel))]
 #[link(name = "rust_builtin", kind = "static")]
 extern {}
 

@@ -55,7 +55,7 @@
 
 #[doc(no_inline)] pub use ascii::{Ascii, AsciiCast, OwnedAsciiCast, AsciiStr};
 #[doc(no_inline)] pub use ascii::IntoBytes;
-#[doc(no_inline)] pub use c_str::ToCStr;
+#[cfg(not(kernel))] #[doc(no_inline)] pub use c_str::ToCStr;
 #[doc(no_inline)] pub use char::Char;
 #[doc(no_inline)] pub use clone::Clone;
 #[doc(no_inline)] pub use cmp::{PartialEq, PartialOrd, Eq, Ord};
@@ -70,7 +70,7 @@
 #[doc(no_inline)] pub use num::{Signed, Unsigned, Primitive, Int, Float};
 #[doc(no_inline)] pub use num::{FloatMath, ToPrimitive, FromPrimitive};
 #[doc(no_inline)] pub use owned::Box;
-#[doc(no_inline)] pub use path::{GenericPath, Path, PosixPath, WindowsPath};
+#[cfg(not(kernel))] #[doc(no_inline)] pub use path::{GenericPath, Path, PosixPath, WindowsPath};
 #[doc(no_inline)] pub use ptr::RawPtr;
 #[doc(no_inline)] pub use io::{Buffer, Writer, Reader, Seek};
 #[doc(no_inline)] pub use str::{Str, StrVector, StrSlice, OwnedStr};
@@ -89,6 +89,6 @@
 #[doc(no_inline)] pub use vec::Vec;
 
 // Reexported runtime types
-#[doc(no_inline)] pub use comm::{sync_channel, channel};
-#[doc(no_inline)] pub use comm::{SyncSender, Sender, Receiver};
-#[doc(no_inline)] pub use task::spawn;
+#[cfg(not(kernel))]  #[doc(no_inline)] pub use comm::{sync_channel, channel};
+#[cfg(not(kernel))]  #[doc(no_inline)] pub use comm::{SyncSender, Sender, Receiver};
+#[cfg(not(kernel))]  #[doc(no_inline)] pub use task::spawn;

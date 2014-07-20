@@ -35,13 +35,25 @@
 /// fail!(4i); // fail with the value of 4 to be collected elsewhere
 /// fail!("this is a {} {message}", "fancy", message = "message");
 /// ```
+
+extern "C" {
+
+  fn abort() -> !;
+
+}
+
+/// hi
+pub fn fail_no_rt() -> ! {
+  unsafe { abort(); }
+}
+
 #[macro_export]
 macro_rules! fail(
     () => (
         fail!("explicit failure")
     );
     ($msg:expr) => (
-        ::std::rt::begin_unwind($msg, file!(), line!())
+        ::std::macros::fail_no_rt()
     );
     ($fmt:expr, $($arg:tt)*) => ({
         // a closure can't have return type !, so we need a full
@@ -56,8 +68,8 @@ macro_rules! fail(
         // were seen when forcing this to be inlined, and that number just goes
         // up with the number of calls to fail!()
         #[inline(always)]
-        fn run_fmt(fmt: &::std::fmt::Arguments) -> ! {
-            ::std::rt::begin_unwind_fmt(fmt, file!(), line!())
+        fn run_fmt(_: &::std::fmt::Arguments) -> ! {
+            ::std::macros::fail_no_rt()
         }
         format_args!(run_fmt, $fmt, $($arg)*)
     });

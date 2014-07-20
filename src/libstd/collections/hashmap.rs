@@ -42,7 +42,7 @@ mod table {
     use ptr::RawPtr;
     use ptr::set_memory;
     use ptr;
-    use rt::heap::{allocate, deallocate};
+    use alloc::heap::{allocate, deallocate};
 
     static EMPTY_BUCKET: u64 = 0u64;
 
@@ -1041,7 +1041,7 @@ impl<K: Hash + Eq, V> HashMap<K, V, sip::SipHasher> {
 
     /// Creates an empty hash map with the given initial capacity.
     pub fn with_capacity(capacity: uint) -> HashMap<K, V, sip::SipHasher> {
-        let mut r = rand::task_rng();
+        let mut r = rand::IsaacRng::new_unseeded();
         let r0 = r.gen();
         let r1 = r.gen();
         let hasher = sip::SipHasher::new_with_keys(r0, r1);
