@@ -128,7 +128,7 @@ unsafe fn closure_exchange_malloc(drop_glue: fn(*mut u8), size: uint,
     alloc as *mut u8
 }
 
-#[cfg(rynux)]
+#[cfg(kernel)]
 mod imp {
 
     use core::ptr::{RawPtr, mut_null, null};
@@ -190,7 +190,7 @@ mod imp {
 }
 
 
-#[cfg(not(rynux), jemalloc)]
+#[cfg(not(kernel), jemalloc)]
 mod imp {
     use core::option::{None, Option};
     use core::ptr::{RawPtr, mut_null, null};
@@ -264,7 +264,7 @@ mod imp {
     }
 }
 
-#[cfg(not(jemalloc), not(rynux), unix)]
+#[cfg(not(jemalloc), not(kernel), unix)]
 mod imp {
     use core::mem;
     use core::ptr;
@@ -331,7 +331,7 @@ mod imp {
     }
 }
 
-#[cfg(not(jemalloc), not(rynux), windows)]
+#[cfg(not(jemalloc), not(kernel), windows)]
 mod imp {
     use libc::{c_void, size_t};
     use core::ptr::RawPtr;
