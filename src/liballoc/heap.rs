@@ -264,7 +264,7 @@ mod imp {
     }
 }
 
-#[cfg(not(jemalloc), unix)]
+#[cfg(not(jemalloc), not(rynux), unix)]
 mod imp {
     use core::mem;
     use core::ptr;
