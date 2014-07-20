@@ -60,7 +60,7 @@
 #![allow(unknown_features)]
 #![feature(globs, intrinsics, lang_items, macro_rules, phase)]
 #![feature(simd, unsafe_destructor, slicing_syntax)]
-#![deny(missing_doc)]
+// #![deny(missing_doc)]
 
 mod macros;
 
@@ -133,6 +133,7 @@ pub mod tuple;
 #[path = "tuple/unit.rs"]
 pub mod unit;
 pub mod fmt;
+pub mod one;
 
 #[doc(hidden)]
 mod core {
