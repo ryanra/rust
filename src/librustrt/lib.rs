@@ -34,8 +34,8 @@ extern crate collections;
 
 #[cfg(test)] #[phase(plugin, link)] extern crate std;
 
-pub use self::util::{Stdio, Stdout, Stderr};
-pub use self::unwind::{begin_unwind, begin_unwind_fmt};
+#[cfg(not(kernel))] pub use self::util::{Stdio, Stdout, Stderr};
+#[cfg(not(kernel))] pub use self::unwind::{begin_unwind, begin_unwind_fmt};
 
 use core::prelude::*;
 

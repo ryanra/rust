@@ -36,16 +36,26 @@
 /// fail!(4i); // fail with the value of 4 to be collected elsewhere
 /// fail!("this is a {} {message}", "fancy", message = "message");
 /// ```
+
+extern "C" {
+
+  fn abort() -> !;
+
+}
+
+/// hi
+pub fn fail_no_rt() -> ! {
+  unsafe { abort(); }
+}
+
 #[macro_export]
 macro_rules! fail(
     () => ({
         fail!("explicit failure")
-    });
-    ($msg:expr) => ({
-        // static requires less code at runtime, more constant data
-        static _FILE_LINE: (&'static str, uint) = (file!(), line!());
-        ::std::rt::begin_unwind($msg, &_FILE_LINE)
-    });
+    );
+    ($msg:expr) => (
+        ::std::macros::fail_no_rt()
+    );
     ($fmt:expr, $($arg:tt)*) => ({
         // a closure can't have return type !, so we need a full
         // function to pass to format_args!, *and* we need the
@@ -64,9 +74,8 @@ macro_rules! fail(
         // insufficient, since the user may have
         // `#[forbid(dead_code)]` and which cannot be overridden.
         #[inline(always)]
-        fn _run_fmt(fmt: &::std::fmt::Arguments) -> ! {
-            static _FILE_LINE: (&'static str, uint) = (file!(), line!());
-            ::std::rt::begin_unwind_fmt(fmt, &_FILE_LINE)
+        fn run_fmt(_: &::std::fmt::Arguments) -> ! {
+            ::std::macros::fail_no_rt()
         }
         format_args!(_run_fmt, $fmt, $($arg)*)
     });

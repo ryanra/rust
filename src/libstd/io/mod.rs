@@ -231,10 +231,10 @@ use libc;
 use mem::transmute;
 use ops::{BitOr, BitXor, BitAnd, Sub, Not};
 use option::{Option, Some, None};
-use os;
+#[cfg(not(kernel))] use os;
 use boxed::Box;
 use result::{Ok, Err, Result};
-use rt::rtio;
+#[cfg(not(kernel))] use rt::rtio;
 use slice::{AsSlice, ImmutableSlice};
 use str::{Str, StrSlice};
 use str;
@@ -244,40 +244,46 @@ use unicode::char::UnicodeChar;
 use vec::Vec;
 
 // Reexports
-pub use self::stdio::stdin;
-pub use self::stdio::stdout;
-pub use self::stdio::stderr;
-pub use self::stdio::print;
-pub use self::stdio::println;
+#[cfg(not(kernel))] pub use self::stdio::stdin;
+#[cfg(not(kernel))] pub use self::stdio::stdout;
+#[cfg(not(kernel))] pub use self::stdio::stderr;
+#[cfg(not(kernel))] pub use self::stdio::print;
+#[cfg(not(kernel))] pub use self::stdio::println;
 
-pub use self::fs::File;
-pub use self::timer::Timer;
-pub use self::net::ip::IpAddr;
-pub use self::net::tcp::TcpListener;
-pub use self::net::tcp::TcpStream;
-pub use self::net::udp::UdpStream;
-pub use self::pipe::PipeStream;
-pub use self::process::{Process, Command};
-pub use self::tempfile::TempDir;
+#[cfg(not(kernel))] pub use self::fs::File;
+#[cfg(not(kernel))] pub use self::timer::Timer;
+#[cfg(not(kernel))] pub use self::net::ip::IpAddr;
+#[cfg(not(kernel))] pub use self::net::tcp::TcpListener;
+#[cfg(not(kernel))] pub use self::net::tcp::TcpStream;
+#[cfg(not(kernel))] pub use self::net::udp::UdpStream;
+#[cfg(not(kernel))] pub use self::pipe::PipeStream;
+#[cfg(not(kernel))] pub use self::process::{Process, Command};
+#[cfg(not(kernel))] pub use self::tempfile::TempDir;
 
 pub use self::mem::{MemReader, BufReader, MemWriter, BufWriter};
 pub use self::buffered::{BufferedReader, BufferedWriter, BufferedStream,
                          LineBufferedWriter};
-pub use self::comm_adapters::{ChanReader, ChanWriter};
+#[cfg(not(kernel))] pub use self::comm_adapters::{ChanReader, ChanWriter};
 
+<<<<<<< HEAD
+=======
+// this comes first to get the iotest! macro
+#[cfg(not(kernel))] pub mod test;
+
+>>>>>>> - removed dependencies so that can have a freestanding std
 mod buffered;
-mod comm_adapters;
+#[cfg(not(kernel))]  mod comm_adapters;
 mod mem;
 mod result;
-mod tempfile;
+#[cfg(not(kernel))]  mod tempfile;
 pub mod extensions;
-pub mod fs;
-pub mod net;
-pub mod pipe;
-pub mod process;
-pub mod stdio;
-pub mod test;
-pub mod timer;
+#[cfg(not(kernel))] pub mod fs;
+#[cfg(not(kernel))] pub mod net;
+#[cfg(not(kernel))] pub mod pipe;
+#[cfg(not(kernel))] pub mod process;
+#[cfg(not(kernel))] pub mod stdio;
+#[cfg(not(kernel))] pub mod test;
+#[cfg(not(kernel))] pub mod timer;
 pub mod util;
 
 /// The default buffer size for various I/O operations
@@ -392,7 +398,7 @@ impl IoError {
             kind: kind,
             desc: desc,
             detail: if detail && kind == OtherIoError {
-                Some(os::error_string(errno).as_slice().chars().map(|c| c.to_lowercase()).collect())
+                None // TODO(ryan) ?
             } else {
                 None
             },
@@ -405,10 +411,12 @@ impl IoError {
     /// descheduling or migration (other than that performed by the
     /// operating system) between the call(s) for which errors are
     /// being checked and the call of this function.
+    #[cfg(not(kernel))]
     pub fn last_error() -> IoError {
         IoError::from_errno(os::errno() as uint, true)
     }
 
+    #[cfg(not(kernel))]
     fn from_rtio_error(err: rtio::IoError) -> IoError {
         let rtio::IoError { code, extra, detail } = err;
         let mut ioerr = IoError::from_errno(code, false);

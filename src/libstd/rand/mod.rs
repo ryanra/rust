@@ -235,9 +235,9 @@ use core_rand::Isaac64Rng as IsaacWordRng;
 pub use core_rand::{Rand, Rng, SeedableRng, Open01, Closed01};
 pub use core_rand::{XorShiftRng, IsaacRng, Isaac64Rng, ChaChaRng};
 pub use core_rand::{distributions, reseeding};
-pub use rand::os::OsRng;
+#[cfg(not(kernel))] pub use rand::os::OsRng;
 
-pub mod os;
+#[cfg(not(kernel))] pub mod os;
 pub mod reader;
 
 /// The standard RNG. This is designed to be efficient on the current
@@ -256,6 +256,7 @@ impl StdRng {
     ///
     /// Reading the randomness from the OS may fail, and any error is
     /// propagated via the `IoResult` return value.
+    #[cfg(not(kernel))]
     pub fn new() -> IoResult<StdRng> {
         OsRng::new().map(|mut r| StdRng { rng: r.gen() })
     }
@@ -294,6 +295,7 @@ impl<'a> SeedableRng<&'a [uint]> for StdRng {
 ///
 /// This will read randomness from the operating system to seed the
 /// generator.
+#[cfg(not(kernel))]
 pub fn weak_rng() -> XorShiftRng {
     match OsRng::new() {
         Ok(mut r) => r.gen(),
@@ -302,8 +304,9 @@ pub fn weak_rng() -> XorShiftRng {
 }
 
 /// Controls how the task-local RNG is reseeded.
-struct TaskRngReseeder;
+#[cfg(not(kernel))] struct TaskRngReseeder;
 
+#[cfg(not(kernel))]
 impl reseeding::Reseeder<StdRng> for TaskRngReseeder {
     fn reseed(&mut self, rng: &mut StdRng) {
         *rng = match StdRng::new() {
@@ -313,9 +316,10 @@ impl reseeding::Reseeder<StdRng> for TaskRngReseeder {
     }
 }
 static TASK_RNG_RESEED_THRESHOLD: uint = 32_768;
-type TaskRngInner = reseeding::ReseedingRng<StdRng, TaskRngReseeder>;
+#[cfg(not(kernel))] type TaskRngInner = reseeding::ReseedingRng<StdRng, TaskRngReseeder>;
 
 /// The task-local RNG.
+#[cfg(not(kernel))]
 pub struct TaskRng {
     rng: Rc<RefCell<TaskRngInner>>,
 }
@@ -331,6 +335,7 @@ pub struct TaskRng {
 /// if the operating system random number generator is rigged to give
 /// the same sequence always. If absolute consistency is required,
 /// explicitly select an RNG, e.g. `IsaacRng` or `Isaac64Rng`.
+#[cfg(not(kernel))]
 pub fn task_rng() -> TaskRng {
     // used to make space in TLS for a random number generator
     local_data_key!(TASK_RNG_KEY: Rc<RefCell<TaskRngInner>>)
@@ -353,6 +358,7 @@ pub fn task_rng() -> TaskRng {
     }
 }
 
+#[cfg(not(kernel))]
 impl Rng for TaskRng {
     fn next_u32(&mut self) -> u32 {
         self.rng.borrow_mut().next_u32()
@@ -388,6 +394,7 @@ impl Rng for TaskRng {
 ///     println!("Better lucky than good!");
 /// }
 /// ```
+#[cfg(not(kernel))]
 #[inline]
 pub fn random<T: Rand>() -> T {
     task_rng().gen()
