@@ -122,16 +122,8 @@ static MIN_ALIGN: uint = 16;
 #[cfg(kernel)]
 mod imp {
 
-    use core::ptr::{RawPtr, mut_null, null};
-    use core;
-
-    pub unsafe fn out_of_memory() -> ! {
-	// FIXME(#14674): This really needs to do something other than just abort
-	//                here, but any printing done must be *guaranteed* to not
-	//                allocate.
-	unsafe { core::intrinsics::abort() }
-    }
-
+    use core::ptr::{RawPtr};
+    
     extern "C" {
         fn malloc(size: uint) -> *mut u8;
 	
@@ -141,17 +133,17 @@ mod imp {
     }
     
     #[inline]
-    pub unsafe fn allocate(size: uint, align: uint) -> *mut u8 {
+    pub unsafe fn allocate(size: uint, _: uint) -> *mut u8 {
         let ptr = malloc(size);
         if ptr.is_null() {
-            core::intrinsics::abort()
+            ::oom();
         }
         ptr
     }
 
     #[inline]
-    pub unsafe fn reallocate(ptr: *mut u8, size: uint, align: uint,
-                             _old_size: uint) -> *mut u8 {
+    pub unsafe fn reallocate(ptr: *mut u8, size: uint, _: uint,
+                             _: uint) -> *mut u8 {
         let ptr = realloc(ptr, size) as *mut u8;
         if ptr.is_null() {
             ::oom();
@@ -160,18 +152,18 @@ mod imp {
     }
 
     #[inline]
-    pub unsafe fn reallocate_inplace(ptr: *mut u8, size: uint, align: uint,
-                                     _old_size: uint) -> bool {
+    pub unsafe fn reallocate_inplace(_: *mut u8, _: uint, _: uint,
+                                     _: uint) -> bool {
         false
     }
 
     #[inline]
-    pub unsafe fn deallocate(ptr: *mut u8, _size: uint, align: uint) {
+    pub unsafe fn deallocate(ptr: *mut u8, _: uint, _: uint) {
         free(ptr);
     }
 
     #[inline]
-    pub fn usable_size(size: uint, align: uint) -> uint {
+    pub fn usable_size(size: uint, _: uint) -> uint {
         size
     }
 
