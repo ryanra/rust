@@ -97,6 +97,7 @@ pub mod arc;
 pub mod rc;
 
 /// Common OOM routine used by liballoc
+#[inline(always)]
 fn oom() -> ! {
     // FIXME(#14674): This really needs to do something other than just abort
     //                here, but any printing done must be *guaranteed* to not

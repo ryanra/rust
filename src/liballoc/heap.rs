@@ -163,7 +163,7 @@ mod imp {
                              _old_size: uint) -> *mut u8 {
         let ptr = realloc(ptr, size) as *mut u8;
         if ptr.is_null() {
-            core::intrinsics::abort()
+            ::oom();
         }
         ptr
     }

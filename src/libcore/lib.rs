@@ -57,7 +57,7 @@
 #![no_std]
 #![feature(globs, intrinsics, lang_items, macro_rules, managed_boxes, phase)]
 #![feature(simd, unsafe_destructor)]
-#![deny(missing_doc)]
+//#![deny(missing_doc)]
 #![allow(unknown_features)] // NOTE: remove after stage0 snapshot
 
 #[cfg(test)] extern crate realcore = "core";
@@ -132,6 +132,7 @@ pub mod slice;
 pub mod str;
 pub mod tuple;
 pub mod fmt;
+pub mod one;
 
 #[doc(hidden)]
 mod core {
