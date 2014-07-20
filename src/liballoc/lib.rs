@@ -73,7 +73,7 @@
 
 #[phase(plugin, link)]
 extern crate core;
-#[cfg(not(kernel))]extern crate libc;
+extern crate libc;
 
 // Allow testing this library
 
@@ -92,6 +92,7 @@ pub use boxed as owned;
 
 pub mod heap;
 #[cfg(not(kernel))] pub mod libc_heap;
+pub mod util;
 
 // Primitive types using the heaps above
 
