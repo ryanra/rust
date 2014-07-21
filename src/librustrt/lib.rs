@@ -41,29 +41,29 @@ use core::prelude::*;
 use alloc::owned::Box;
 use core::any::Any;
 
-use task::{Task, BlockedTask, TaskOpts};
+#[cfg(not(kernel))] use task::{Task, BlockedTask, TaskOpts};
 
 mod macros;
 
-mod at_exit_imp;
-mod local_ptr;
-mod thread_local_storage;
+#[cfg(not(kernel))] mod at_exit_imp;
+#[cfg(not(kernel))] mod local_ptr;
+#[cfg(not(kernel))] mod thread_local_storage;
 mod util;
-mod libunwind;
+#[cfg(not(kernel))] mod libunwind;
 
-pub mod args;
-pub mod bookkeeping;
+#[cfg(not(kernel))] pub mod args;
+#[cfg(not(kernel))] pub mod bookkeeping;
 pub mod c_str;
-pub mod exclusive;
-pub mod local;
-pub mod local_data;
-pub mod local_heap;
-pub mod mutex;
-pub mod rtio;
-pub mod stack;
-pub mod task;
-pub mod thread;
-pub mod unwind;
+#[cfg(not(kernel))] pub mod exclusive;
+#[cfg(not(kernel))] pub mod local;
+#[cfg(not(kernel))] pub mod local_data;
+#[cfg(not(kernel))] pub mod local_heap;
+#[cfg(not(kernel))] pub mod mutex;
+#[cfg(not(kernel))] pub mod rtio;
+#[cfg(not(kernel))] pub mod stack;
+#[cfg(not(kernel))] pub mod task;
+#[cfg(not(kernel))] pub mod thread;
+#[cfg(not(kernel))] pub mod unwind;
 
 /// The interface to the current runtime.
 ///
@@ -72,6 +72,7 @@ pub mod unwind;
 /// implement this trait. The goal of this trait is to encompass all the
 /// fundamental differences in functionality between the 1:1 and M:N runtime
 /// modes.
+#[cfg(not(kernel))]
 pub trait Runtime {
     // Necessary scheduling functions, used for channels and blocking I/O
     // (sometimes).
@@ -105,6 +106,7 @@ pub static DEFAULT_ERROR_CODE: int = 101;
 /// Initializes global state, including frobbing
 /// the crate's logging flags, registering GC
 /// metadata, and storing the process arguments.
+#[cfg(not(kernel))]
 pub fn init(argc: int, argv: **u8) {
     // FIXME: Derefing these pointers is not safe.
     // Need to propagate the unsafety to `start`.
@@ -133,6 +135,7 @@ pub fn init(argc: int, argv: **u8) {
 ///
 /// It is forbidden for procedures to register more `at_exit` handlers when they
 /// are running, and doing so will lead to a process abort.
+#[cfg(not(kernel))]
 pub fn at_exit(f: proc():Send) {
     at_exit_imp::push(f);
 }
@@ -146,6 +149,7 @@ pub fn at_exit(f: proc():Send) {
 ///
 /// Invoking cleanup while portions of the runtime are still in use may cause
 /// undefined behavior.
+#[cfg(not(kernel))]
 pub unsafe fn cleanup() {
     bookkeeping::wait_for_other_tasks();
     at_exit_imp::run();
@@ -154,6 +158,7 @@ pub unsafe fn cleanup() {
 }
 
 // FIXME: these probably shouldn't be public...
+#[cfg(not(kernel))]
 #[doc(hidden)]
 pub mod shouldnt_be_public {
     #[cfg(not(test))]
