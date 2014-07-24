@@ -10,10 +10,10 @@
 
 
 use back::abi;
-use lib::llvm::llvm;
-use lib::llvm::ValueRef;
-use lib;
+use llvm;
+use llvm::ValueRef;
 use metadata::csearch;
+use middle::subst::VecPerParamSpace;
 use middle::subst;
 use middle::trans::base::*;
 use middle::trans::build::*;
@@ -36,9 +36,10 @@ use util::ppaux::Repr;
 
 use std::c_str::ToCStr;
 use std::gc::Gc;
-use syntax::abi::Rust;
+use syntax::abi::{Rust, RustCall};
 use syntax::parse::token;
 use syntax::{ast, ast_map, visit};
+use syntax::ast_util::PostExpansionMethod;
 
 /**
 The main "translation" pass for methods.  Generates code
@@ -66,10 +67,15 @@ pub fn trans_impl(ccx: &CrateContext,
         return;
     }
     for method in methods.iter() {
-        if method.generics.ty_params.len() == 0u {
+        if method.pe_generics().ty_params.len() == 0u {
             let llfn = get_item_val(ccx, method.id);
-            trans_fn(ccx, &*method.decl, &*method.body,
-                     llfn, &param_substs::empty(), method.id, []);
+            trans_fn(ccx,
+                     &*method.pe_fn_decl(),
+                     &*method.pe_body(),
+                     llfn,
+                     &param_substs::empty(),
+                     method.id,
+                     []);
         } else {
             let mut v = TransItemVisitor{ ccx: ccx };
             visit::walk_method_helper(&mut v, &**method, ());
@@ -99,10 +105,13 @@ pub fn trans_method_callee<'a>(
     };
 
     match origin {
-        typeck::MethodStatic(did) => {
+        typeck::MethodStatic(did) |
+        typeck::MethodStaticUnboxedClosure(did) => {
             Callee {
                 bcx: bcx,
-                data: Fn(callee::trans_fn_ref(bcx, did, MethodCall(method_call)))
+                data: Fn(callee::trans_fn_ref(bcx,
+                                              did,
+                                              MethodCall(method_call))),
             }
         }
         typeck::MethodParam(typeck::MethodParam {
@@ -160,7 +169,7 @@ pub fn trans_static_method_callee(bcx: &Block,
             ast_map::NodeTraitMethod(method) => {
                 let ident = match *method {
                     ast::Required(ref m) => m.ident,
-                    ast::Provided(ref m) => m.ident
+                    ast::Provided(ref m) => m.pe_ident()
                 };
                 ident.name
             }
@@ -195,6 +204,9 @@ pub fn trans_static_method_callee(bcx: &Block,
             let llty = type_of_fn_from_ty(ccx, callee_ty).ptr_to();
             PointerCast(bcx, llfn, llty)
         }
+        typeck::vtable_unboxed_closure(_) => {
+            bcx.tcx().sess.bug("can't call a closure vtable in a static way");
+        }
         _ => {
             fail!("vtable_param left in monomorphized \
                    function's vtable substs");
@@ -220,12 +232,13 @@ fn method_with_name(ccx: &CrateContext,
     *meth_did
 }
 
-fn trans_monomorphized_callee<'a>(bcx: &'a Block<'a>,
-                                  method_call: MethodCall,
-                                  trait_id: ast::DefId,
-                                  n_method: uint,
-                                  vtbl: typeck::vtable_origin)
-                                  -> Callee<'a> {
+fn trans_monomorphized_callee<'a>(
+                              bcx: &'a Block<'a>,
+                              method_call: MethodCall,
+                              trait_id: ast::DefId,
+                              n_method: uint,
+                              vtbl: typeck::vtable_origin)
+                              -> Callee<'a> {
     let _icx = push_ctxt("meth::trans_monomorphized_callee");
     match vtbl {
       typeck::vtable_static(impl_did, rcvr_substs, rcvr_origins) => {
@@ -247,6 +260,26 @@ fn trans_monomorphized_callee<'a>(bcx: &'a Block<'a>,
                                                callee_origins);
 
           Callee { bcx: bcx, data: Fn(llfn) }
+      }
+      typeck::vtable_unboxed_closure(closure_def_id) => {
+          // The static region and type parameters are lies, but we're in
+          // trans so it doesn't matter.
+          //
+          // FIXME(pcwalton): Is this true in the case of type parameters?
+          let callee_substs = get_callee_substitutions_for_unboxed_closure(
+                bcx,
+                closure_def_id);
+
+          let llfn = trans_fn_ref_with_vtables(bcx,
+                                               closure_def_id,
+                                               MethodCall(method_call),
+                                               callee_substs,
+                                               VecPerParamSpace::empty());
+
+          Callee {
+              bcx: bcx,
+              data: Fn(llfn),
+          }
       }
       typeck::vtable_param(..) => {
           bcx.tcx().sess.bug(
@@ -380,8 +413,12 @@ pub fn trans_trait_callee_from_llval<'a>(bcx: &'a Block<'a>,
     debug!("(translating trait callee) loading method");
     // Replace the self type (&Self or Box<Self>) with an opaque pointer.
     let llcallee_ty = match ty::get(callee_ty).sty {
-        ty::ty_bare_fn(ref f) if f.abi == Rust => {
-            type_of_rust_fn(ccx, true, f.sig.inputs.slice_from(1), f.sig.output)
+        ty::ty_bare_fn(ref f) if f.abi == Rust || f.abi == RustCall => {
+            type_of_rust_fn(ccx,
+                            Some(Type::i8p(ccx)),
+                            f.sig.inputs.slice_from(1),
+                            f.sig.output,
+                            f.abi)
         }
         _ => {
             ccx.sess().bug("meth::trans_trait_callee given non-bare-rust-fn");
@@ -402,6 +439,26 @@ pub fn trans_trait_callee_from_llval<'a>(bcx: &'a Block<'a>,
             llself: llself,
         })
     };
+}
+
+/// Creates the self type and (fake) callee substitutions for an unboxed
+/// closure with the given def ID. The static region and type parameters are
+/// lies, but we're in trans so it doesn't matter.
+fn get_callee_substitutions_for_unboxed_closure(bcx: &Block,
+                                                def_id: ast::DefId)
+                                                -> subst::Substs {
+    let self_ty = ty::mk_unboxed_closure(bcx.tcx(), def_id);
+    subst::Substs::erased(
+        VecPerParamSpace::new(Vec::new(),
+                              vec![
+                                  ty::mk_rptr(bcx.tcx(),
+                                              ty::ReStatic,
+                                              ty::mt {
+                                                ty: self_ty,
+                                                mutbl: ast::MutMutable,
+                                              })
+                              ],
+                              Vec::new()))
 }
 
 /// Creates a returns a dynamic vtable for the given type and vtable origin.
@@ -431,6 +488,21 @@ fn get_vtable(bcx: &Block,
             typeck::vtable_static(id, substs, sub_vtables) => {
                 emit_vtable_methods(bcx, id, substs, sub_vtables).move_iter()
             }
+            typeck::vtable_unboxed_closure(closure_def_id) => {
+                let callee_substs =
+                    get_callee_substitutions_for_unboxed_closure(
+                        bcx,
+                        closure_def_id);
+
+                let llfn = trans_fn_ref_with_vtables(
+                    bcx,
+                    closure_def_id,
+                    ExprId(0),
+                    callee_substs,
+                    VecPerParamSpace::empty());
+
+                (vec!(llfn)).move_iter()
+            }
             _ => ccx.sess().bug("get_vtable: expected a static origin"),
         }
     });
@@ -459,8 +531,8 @@ pub fn make_vtable<I: Iterator<ValueRef>>(ccx: &CrateContext,
             llvm::LLVMAddGlobal(ccx.llmod, val_ty(tbl).to_ref(), buf)
         });
         llvm::LLVMSetInitializer(vt_gvar, tbl);
-        llvm::LLVMSetGlobalConstant(vt_gvar, lib::llvm::True);
-        lib::llvm::SetLinkage(vt_gvar, lib::llvm::InternalLinkage);
+        llvm::LLVMSetGlobalConstant(vt_gvar, llvm::True);
+        llvm::SetLinkage(vt_gvar, llvm::InternalLinkage);
         vt_gvar
     }
 }
@@ -492,14 +564,24 @@ fn emit_vtable_methods(bcx: &Block,
                m.repr(tcx),
                substs.repr(tcx));
         if m.generics.has_type_params(subst::FnSpace) ||
-           ty::type_has_self(ty::mk_bare_fn(tcx, m.fty.clone()))
-        {
+           ty::type_has_self(ty::mk_bare_fn(tcx, m.fty.clone())) {
             debug!("(making impl vtable) method has self or type params: {}",
                    token::get_ident(ident));
             C_null(Type::nil(ccx).ptr_to())
         } else {
-            trans_fn_ref_with_vtables(bcx, m_id, ExprId(0),
-                                      substs.clone(), vtables.clone())
+            let mut fn_ref = trans_fn_ref_with_vtables(bcx,
+                                                       m_id,
+                                                       ExprId(0),
+                                                       substs.clone(),
+                                                       vtables.clone());
+            if m.explicit_self == ty::ByValueExplicitSelfCategory {
+                fn_ref = trans_unboxing_shim(bcx,
+                                             fn_ref,
+                                             &*m,
+                                             m_id,
+                                             substs.clone());
+            }
+            fn_ref
         }
     }).collect()
 }

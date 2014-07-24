@@ -30,14 +30,14 @@ itself (note that inherent impls can only be defined in the same
 module as the type itself).
 
 Inherent candidates are not always derived from impls.  If you have a
-trait instance, such as a value of type `Box<ToStr>`, then the trait
-methods (`to_str()`, in this case) are inherently associated with it.
+trait instance, such as a value of type `Box<ToString>`, then the trait
+methods (`to_string()`, in this case) are inherently associated with it.
 Another case is type parameters, in which case the methods of their
 bounds are inherent.
 
 Extension candidates are derived from imported traits.  If I have the
-trait `ToStr` imported, and I call `to_str()` on a value of type `T`,
-then we will go off to find out whether there is an impl of `ToStr`
+trait `ToString` imported, and I call `to_string()` on a value of type `T`,
+then we will go off to find out whether there is an impl of `ToString`
 for `T`.  These kinds of method calls are called "extension methods".
 They can be defined in any module, not only the one that defined `T`.
 Furthermore, you must import the trait to call such a method.
@@ -87,10 +87,11 @@ use middle::ty;
 use middle::typeck::astconv::AstConv;
 use middle::typeck::check::{FnCtxt, PreferMutLvalue, impl_self_ty};
 use middle::typeck::check;
+use middle::typeck::infer::MiscVariable;
 use middle::typeck::infer;
 use middle::typeck::MethodCallee;
 use middle::typeck::{MethodOrigin, MethodParam};
-use middle::typeck::{MethodStatic, MethodObject};
+use middle::typeck::{MethodStatic, MethodStaticUnboxedClosure, MethodObject};
 use middle::typeck::{param_index};
 use middle::typeck::check::regionmanip::replace_late_bound_regions_in_fn_sig;
 use middle::typeck::TypeAndSubsts;
@@ -100,9 +101,7 @@ use util::ppaux::Repr;
 
 use std::collections::HashSet;
 use std::rc::Rc;
-use syntax::ast::{DefId, SelfValue, SelfRegion};
-use syntax::ast::{SelfUniq, SelfStatic};
-use syntax::ast::{MutMutable, MutImmutable};
+use syntax::ast::{DefId, MutImmutable, MutMutable};
 use syntax::ast;
 use syntax::codemap::Span;
 use syntax::parse::token;
@@ -264,16 +263,18 @@ fn construct_transformed_self_ty_for_object(
     // The subst we get in has Err as the "Self" type. For an object
     // type, we don't put any type into the Self paramspace, so let's
     // make a copy of rcvr_substs that has the Self paramspace empty.
-    obj_substs.types.get_mut_vec(subst::SelfSpace).pop().unwrap();
+    obj_substs.types.pop(subst::SelfSpace).unwrap();
 
     match method_ty.explicit_self {
-        ast::SelfStatic => {
+        StaticExplicitSelfCategory => {
             tcx.sess.span_bug(span, "static method for object type receiver");
         }
-        ast::SelfValue => {
-            ty::mk_err() // error reported in `enforce_object_limitations()`
+        ByValueExplicitSelfCategory => {
+            let tr = ty::mk_trait(tcx, trait_def_id, obj_substs,
+                                  ty::empty_builtin_bounds());
+            ty::mk_uniq(tcx, tr)
         }
-        ast::SelfRegion(..) | ast::SelfUniq => {
+        ByReferenceExplicitSelfCategory(..) | ByBoxExplicitSelfCategory => {
             let transformed_self_ty = *method_ty.fty.sig.inputs.get(0);
             match ty::get(transformed_self_ty).sty {
                 ty::ty_rptr(r, mt) => { // must be SelfRegion
@@ -341,7 +342,7 @@ struct Candidate {
 #[deriving(Clone)]
 pub enum RcvrMatchCondition {
     RcvrMatchesIfObject(ast::DefId),
-    RcvrMatchesIfSubtype(ty::t)
+    RcvrMatchesIfSubtype(ty::t),
 }
 
 impl<'a> LookupContext<'a> {
@@ -374,7 +375,7 @@ impl<'a> LookupContext<'a> {
                    autoderefs: uint)
                    -> Option<Option<MethodCallee>> {
         debug!("search_step: self_ty={} autoderefs={}",
-               self.ty_to_str(self_ty), autoderefs);
+               self.ty_to_string(self_ty), autoderefs);
 
         match self.deref_args {
             check::DontDerefArgs => {
@@ -441,7 +442,9 @@ impl<'a> LookupContext<'a> {
                     }
                     _ => {}
                 },
-                ty_enum(did, _) | ty_struct(did, _) => {
+                ty_enum(did, _) |
+                ty_struct(did, _) |
+                ty_unboxed_closure(did) => {
                     if self.check_traits == CheckTraitsAndInherentMethods {
                         self.push_inherent_impl_candidates_for_type(did);
                     }
@@ -464,6 +467,10 @@ impl<'a> LookupContext<'a> {
             match get(self_ty).sty {
                 ty_param(p) => {
                     self.push_inherent_candidates_from_param(self_ty, restrict_to, p);
+                }
+                ty_unboxed_closure(closure_did) => {
+                    self.push_unboxed_closure_call_candidates_if_applicable(
+                        closure_did);
                 }
                 _ => { /* No bound methods in these types */ }
             }
@@ -497,16 +504,94 @@ impl<'a> LookupContext<'a> {
         let opt_applicable_traits = self.fcx.ccx.trait_map.find(&expr_id);
         for applicable_traits in opt_applicable_traits.move_iter() {
             for trait_did in applicable_traits.iter() {
+                debug!("push_extension_candidates() found trait: {}",
+                       if trait_did.krate == ast::LOCAL_CRATE {
+                           self.fcx.ccx.tcx.map.node_to_string(trait_did.node)
+                       } else {
+                           "(external)".to_string()
+                       });
                 self.push_extension_candidate(*trait_did);
             }
         }
+    }
+
+    fn push_unboxed_closure_call_candidate_if_applicable(
+            &mut self,
+            trait_did: DefId,
+            closure_did: DefId,
+            closure_function_type: &ClosureTy) {
+        let method =
+            ty::trait_methods(self.tcx(), trait_did).get(0).clone();
+
+        let vcx = self.fcx.vtable_context();
+        let region_params =
+            vec!(vcx.infcx.next_region_var(MiscVariable(self.span)));
+
+        // Get the tupled type of the arguments.
+        let arguments_type = *closure_function_type.sig.inputs.get(0);
+        let return_type = closure_function_type.sig.output;
+
+        let unboxed_closure_type = ty::mk_unboxed_closure(self.tcx(),
+                                                          closure_did);
+        self.extension_candidates.push(Candidate {
+            rcvr_match_condition:
+                RcvrMatchesIfSubtype(unboxed_closure_type),
+            rcvr_substs: subst::Substs::new_trait(
+                vec![arguments_type, return_type],
+                region_params,
+                *vcx.infcx.next_ty_vars(1).get(0)),
+            method_ty: method,
+            origin: MethodStaticUnboxedClosure(closure_did),
+        });
+    }
+
+    fn push_unboxed_closure_call_candidates_if_applicable(
+            &mut self,
+            closure_did: DefId) {
+        // FIXME(pcwalton): Try `Fn` and `FnOnce` too.
+        let trait_did = match self.tcx().lang_items.fn_mut_trait() {
+            Some(trait_did) => trait_did,
+            None => return,
+        };
+
+        match self.tcx()
+                  .unboxed_closure_types
+                  .borrow()
+                  .find(&closure_did) {
+            None => {}  // Fall through to try inherited.
+            Some(closure_function_type) => {
+                self.push_unboxed_closure_call_candidate_if_applicable(
+                    trait_did,
+                    closure_did,
+                    closure_function_type);
+                return
+            }
+        }
+
+        match self.fcx
+                  .inh
+                  .unboxed_closure_types
+                  .borrow()
+                  .find(&closure_did) {
+            Some(closure_function_type) => {
+                self.push_unboxed_closure_call_candidate_if_applicable(
+                    trait_did,
+                    closure_did,
+                    closure_function_type);
+                return
+            }
+            None => {}
+        }
+
+        self.tcx().sess.bug("didn't find unboxed closure type in tcx map or \
+                             inherited map, so there")
     }
 
     fn push_inherent_candidates_from_object(&mut self,
                                             did: DefId,
                                             substs: &subst::Substs) {
         debug!("push_inherent_candidates_from_object(did={}, substs={})",
-               self.did_to_str(did),
+               self.did_to_string(did),
                substs.repr(self.tcx()));
         let _indenter = indenter();
         let tcx = self.tcx();
@@ -616,7 +701,7 @@ impl<'a> LookupContext<'a> {
 
             let trait_methods = ty::trait_methods(tcx, bound_trait_ref.def_id);
             match trait_methods.iter().position(|m| {
-                m.explicit_self != ast::SelfStatic &&
+                m.explicit_self != ty::StaticExplicitSelfCategory &&
                 m.ident.name == self.m_name }) {
                 Some(pos) => {
                     let method = trait_methods.get(pos).clone();
@@ -731,7 +816,7 @@ impl<'a> LookupContext<'a> {
             None => None,
             Some(method) => {
                 debug!("(searching for autoderef'd method) writing \
-                       adjustment {:?} for {}", adjustment, self.ty_to_str( self_ty));
+                       adjustment {:?} for {}", adjustment, self.ty_to_string( self_ty));
                 match adjustment {
                     Some((self_expr_id, adj)) => {
                         self.fcx.write_adjustment(self_expr_id, adj);
@@ -807,7 +892,7 @@ impl<'a> LookupContext<'a> {
 
     fn auto_slice_vec(&self, mt: ty::mt, autoderefs: uint) -> Option<MethodCallee> {
         let tcx = self.tcx();
-        debug!("auto_slice_vec {}", ppaux::ty_to_str(tcx, mt.ty));
+        debug!("auto_slice_vec {}", ppaux::ty_to_string(tcx, mt.ty));
 
         // First try to borrow to a slice
         let entry = self.search_for_some_kind_of_autorefd_method(
@@ -884,7 +969,7 @@ impl<'a> LookupContext<'a> {
          * `~[]` to `&[]`.
          */
 
-        debug!("search_for_autosliced_method {}", ppaux::ty_to_str(self.tcx(), self_ty));
+        debug!("search_for_autosliced_method {}", ppaux::ty_to_string(self.tcx(), self_ty));
 
         let sty = ty::get(self_ty).sty.clone();
         match sty {
@@ -926,7 +1011,8 @@ impl<'a> LookupContext<'a> {
             ty_infer(FloatVar(_)) |
             ty_param(..) | ty_nil | ty_bot | ty_bool |
             ty_char | ty_int(..) | ty_uint(..) |
-            ty_float(..) | ty_enum(..) | ty_ptr(..) | ty_struct(..) | ty_tup(..) |
+            ty_float(..) | ty_enum(..) | ty_ptr(..) | ty_struct(..) |
+            ty_unboxed_closure(..) | ty_tup(..) |
             ty_str | ty_vec(..) | ty_trait(..) | ty_closure(..) => {
                 self.search_for_some_kind_of_autorefd_method(
                     AutoPtr, autoderefs, [MutImmutable, MutMutable],
@@ -937,7 +1023,7 @@ impl<'a> LookupContext<'a> {
 
             ty_infer(TyVar(_)) => {
                 self.bug(format!("unexpected type: {}",
-                                 self.ty_to_str(self_ty)).as_slice());
+                                 self.ty_to_string(self_ty)).as_slice());
             }
         }
     }
@@ -991,7 +1077,7 @@ impl<'a> LookupContext<'a> {
     }
 
     fn search_for_method(&self, rcvr_ty: ty::t) -> Option<MethodCallee> {
-        debug!("search_for_method(rcvr_ty={})", self.ty_to_str(rcvr_ty));
+        debug!("search_for_method(rcvr_ty={})", self.ty_to_string(rcvr_ty));
         let _indenter = indenter();
 
         // I am not sure that inherent methods should have higher
@@ -1021,7 +1107,10 @@ impl<'a> LookupContext<'a> {
 
         if self.report_statics == ReportStaticMethods {
             // lookup should only be called with ReportStaticMethods if a regular lookup failed
-            assert!(relevant_candidates.iter().all(|c| c.method_ty.explicit_self == SelfStatic));
+            assert!(relevant_candidates.iter()
+                                       .all(|c| {
+                c.method_ty.explicit_self == ty::StaticExplicitSelfCategory
+            }));
 
             self.tcx().sess.fileline_note(self.span,
                                 "found defined static methods, maybe a `self` is missing?");
@@ -1039,8 +1128,7 @@ impl<'a> LookupContext<'a> {
         }
 
         if relevant_candidates.len() > 1 {
-            self.tcx().sess.span_err(
-                self.span,
+            span_err!(self.tcx().sess, self.span, E0034,
                 "multiple applicable methods in scope");
             for (idx, candidate) in relevant_candidates.iter().enumerate() {
                 self.report_candidate(idx, &candidate.origin);
@@ -1092,14 +1180,15 @@ impl<'a> LookupContext<'a> {
         let tcx = self.tcx();
 
         debug!("confirm_candidate(rcvr_ty={}, candidate={})",
-               self.ty_to_str(rcvr_ty),
+               self.ty_to_string(rcvr_ty),
                candidate.repr(self.tcx()));
 
         self.enforce_object_limitations(candidate);
         self.enforce_drop_trait_limitations(candidate);
 
         // static methods should never have gotten this far:
-        assert!(candidate.method_ty.explicit_self != SelfStatic);
+        assert!(candidate.method_ty.explicit_self !=
+                ty::StaticExplicitSelfCategory);
 
         // Determine the values for the generic parameters of the method.
         // If they were not explicitly supplied, just construct fresh
@@ -1110,13 +1199,11 @@ impl<'a> LookupContext<'a> {
             if num_supplied_tps == 0u {
                 self.fcx.infcx().next_ty_vars(num_method_tps)
             } else if num_method_tps == 0u {
-                tcx.sess.span_err(
-                    self.span,
-                    "this method does not take type parameters");
+                span_err!(tcx.sess, self.span, E0035,
+                    "does not take type parameters");
                 self.fcx.infcx().next_ty_vars(num_method_tps)
             } else if num_supplied_tps != num_method_tps {
-                tcx.sess.span_err(
-                    self.span,
+                span_err!(tcx.sess, self.span, E0036,
                     "incorrect number of type parameters given for this method");
                 self.fcx.infcx().next_ty_vars(num_method_tps)
             } else {
@@ -1131,7 +1218,7 @@ impl<'a> LookupContext<'a> {
         let m_regions =
             self.fcx.infcx().region_vars_for_defs(
                 self.span,
-                candidate.method_ty.generics.regions.get_vec(subst::FnSpace));
+                candidate.method_ty.generics.regions.get_slice(subst::FnSpace));
 
         let all_substs = candidate.rcvr_substs.clone().with_method(m_types, m_regions);
 
@@ -1175,7 +1262,7 @@ impl<'a> LookupContext<'a> {
             fn_style: bare_fn_ty.fn_style,
             abi: bare_fn_ty.abi.clone(),
         });
-        debug!("after replacing bound regions, fty={}", self.ty_to_str(fty));
+        debug!("after replacing bound regions, fty={}", self.ty_to_string(fty));
 
         // Before, we only checked whether self_ty could be a subtype
         // of rcvr_ty; now we actually make it so (this may cause
@@ -1189,8 +1276,8 @@ impl<'a> LookupContext<'a> {
             Err(_) => {
                 self.bug(format!(
                         "{} was a subtype of {} but now is not?",
-                        self.ty_to_str(rcvr_ty),
-                        self.ty_to_str(transformed_self_ty)).as_slice());
+                        self.ty_to_string(rcvr_ty),
+                        self.ty_to_string(transformed_self_ty)).as_slice());
             }
         }
 
@@ -1211,35 +1298,31 @@ impl<'a> LookupContext<'a> {
          */
 
         match candidate.origin {
-            MethodStatic(..) | MethodParam(..) => {
+            MethodStatic(..) |
+            MethodParam(..) |
+            MethodStaticUnboxedClosure(..) => {
                 return; // not a call to a trait instance
             }
             MethodObject(..) => {}
         }
 
         match candidate.method_ty.explicit_self {
-            ast::SelfStatic => { // reason (a) above
+            ty::StaticExplicitSelfCategory => { // reason (a) above
                 self.tcx().sess.span_err(
                     self.span,
                     "cannot call a method without a receiver \
                      through an object");
             }
 
-            ast::SelfValue => { // reason (a) above
-                self.tcx().sess.span_err(
-                    self.span,
-                    "cannot call a method with a by-value receiver \
-                     through an object");
-            }
-
-            ast::SelfRegion(..) | ast::SelfUniq => {}
+            ty::ByValueExplicitSelfCategory |
+            ty::ByReferenceExplicitSelfCategory(..) |
+            ty::ByBoxExplicitSelfCategory => {}
         }
 
         // reason (a) above
         let check_for_self_ty = |ty| {
             if ty::type_has_self(ty) {
-                self.tcx().sess.span_err(
-                    self.span,
+                span_err!(self.tcx().sess, self.span, E0038,
                     "cannot call a method whose type contains a \
                      self-type through an object");
                 true
@@ -1261,8 +1344,7 @@ impl<'a> LookupContext<'a> {
 
         if candidate.method_ty.generics.has_type_params(subst::FnSpace) {
             // reason (b) above
-            self.tcx().sess.span_err(
-                self.span,
+            span_err!(self.tcx().sess, self.span, E0039,
                 "cannot call a generic method through an object");
         }
     }
@@ -1274,6 +1356,7 @@ impl<'a> LookupContext<'a> {
             MethodStatic(method_id) => {
                 bad = self.tcx().destructors.borrow().contains(&method_id);
             }
+            MethodStaticUnboxedClosure(_) => bad = false,
             // FIXME: does this properly enforce this on everything now
             // that self has been merged in? -sully
             MethodParam(MethodParam { trait_id: trait_id, .. }) |
@@ -1284,8 +1367,8 @@ impl<'a> LookupContext<'a> {
         }
 
         if bad {
-            self.tcx().sess.span_err(self.span,
-                                     "explicit call to destructor");
+            span_err!(self.tcx().sess, self.span, E0040,
+                "explicit call to destructor");
         }
     }
 
@@ -1293,19 +1376,38 @@ impl<'a> LookupContext<'a> {
     // candidate method's `self_ty`.
     fn is_relevant(&self, rcvr_ty: ty::t, candidate: &Candidate) -> bool {
         debug!("is_relevant(rcvr_ty={}, candidate={})",
-               self.ty_to_str(rcvr_ty), candidate.repr(self.tcx()));
+               self.ty_to_string(rcvr_ty), candidate.repr(self.tcx()));
 
         return match candidate.method_ty.explicit_self {
-            SelfStatic => {
+            StaticExplicitSelfCategory => {
                 debug!("(is relevant?) explicit self is static");
                 self.report_statics == ReportStaticMethods
             }
 
-            SelfValue => {
-                rcvr_matches_ty(self.fcx, rcvr_ty, candidate)
+            ByValueExplicitSelfCategory => {
+                debug!("(is relevant?) explicit self is by-value");
+                match ty::get(rcvr_ty).sty {
+                    ty::ty_uniq(typ) => {
+                        match ty::get(typ).sty {
+                            ty::ty_trait(box ty::TyTrait {
+                                def_id: self_did,
+                                ..
+                            }) => {
+                                rcvr_matches_object(self_did, candidate) ||
+                                    rcvr_matches_ty(self.fcx,
+                                                    rcvr_ty,
+                                                    candidate)
+                            }
+                            _ => {
+                                rcvr_matches_ty(self.fcx, rcvr_ty, candidate)
+                            }
+                        }
+                    }
+                    _ => rcvr_matches_ty(self.fcx, rcvr_ty, candidate)
+                }
             }
 
-            SelfRegion(_, m) => {
+            ByReferenceExplicitSelfCategory(_, m) => {
                 debug!("(is relevant?) explicit self is a region");
                 match ty::get(rcvr_ty).sty {
                     ty::ty_rptr(_, mt) => {
@@ -1325,7 +1427,7 @@ impl<'a> LookupContext<'a> {
                 }
             }
 
-            SelfUniq => {
+            ByBoxExplicitSelfCategory => {
                 debug!("(is relevant?) explicit self is a unique pointer");
                 match ty::get(rcvr_ty).sty {
                     ty::ty_uniq(typ) => {
@@ -1396,6 +1498,9 @@ impl<'a> LookupContext<'a> {
                 };
                 self.report_static_candidate(idx, did)
             }
+            MethodStaticUnboxedClosure(did) => {
+                self.report_static_candidate(idx, did)
+            }
             MethodParam(ref mp) => {
                 self.report_param_candidate(idx, (*mp).trait_id)
             }
@@ -1411,28 +1516,22 @@ impl<'a> LookupContext<'a> {
         } else {
             self.span
         };
-        self.tcx().sess.span_note(
-            span,
-            format!("candidate #{} is `{}`",
-                    idx + 1u,
-                    ty::item_path_str(self.tcx(), did)).as_slice());
+        span_note!(self.tcx().sess, span,
+            "candidate #{} is `{}`",
+            idx + 1u, ty::item_path_str(self.tcx(), did));
     }
 
     fn report_param_candidate(&self, idx: uint, did: DefId) {
-        self.tcx().sess.span_note(
-            self.span,
-            format!("candidate #{} derives from the bound `{}`",
-                    idx + 1u,
-                    ty::item_path_str(self.tcx(), did)).as_slice());
+        span_note!(self.tcx().sess, self.span,
+            "candidate #{} derives from the bound `{}`",
+            idx + 1u, ty::item_path_str(self.tcx(), did));
     }
 
     fn report_trait_candidate(&self, idx: uint, did: DefId) {
-        self.tcx().sess.span_note(
-            self.span,
-            format!("candidate #{} derives from the type of the receiver, \
-                     which is the trait `{}`",
-                    idx + 1u,
-                    ty::item_path_str(self.tcx(), did)).as_slice());
+        span_note!(self.tcx().sess, self.span,
+            "candidate #{} derives from the type of the receiver, \
+            which is the trait `{}`",
+            idx + 1u, ty::item_path_str(self.tcx(), did));
     }
 
     fn infcx(&'a self) -> &'a infer::InferCtxt<'a> {
@@ -1443,11 +1542,11 @@ impl<'a> LookupContext<'a> {
         self.fcx.tcx()
     }
 
-    fn ty_to_str(&self, t: ty::t) -> String {
-        self.fcx.infcx().ty_to_str(t)
+    fn ty_to_string(&self, t: ty::t) -> String {
+        self.fcx.infcx().ty_to_string(t)
     }
 
-    fn did_to_str(&self, did: DefId) -> String {
+    fn did_to_string(&self, did: DefId) -> String {
         ty::item_path_str(self.tcx(), did)
     }
 
@@ -1479,3 +1578,6 @@ impl Repr for RcvrMatchCondition {
         }
     }
 }
+
+
+

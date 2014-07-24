@@ -13,8 +13,10 @@
 ######################################################################
 
 # The version number
-CFG_RELEASE_NUM=0.11.0
-CFG_RELEASE_LABEL=
+CFG_RELEASE_NUM=0.12.0
+CFG_RELEASE_LABEL=-pre
+
+CFG_FILENAME_EXTRA=4e7c5e5c
 
 ifndef CFG_ENABLE_NIGHTLY
 # This is the normal version string
@@ -120,8 +122,8 @@ endif
 ifdef TRACE
   CFG_RUSTC_FLAGS += -Z trace
 endif
-ifdef CFG_DISABLE_RPATH
-CFG_RUSTC_FLAGS += -C no-rpath
+ifdef CFG_ENABLE_RPATH
+CFG_RUSTC_FLAGS += -C rpath
 endif
 
 # The executables crated during this compilation process have no need to include
@@ -375,7 +377,7 @@ define SREQ_CMDS
 ifeq ($$(OSTYPE_$(3)),apple-darwin)
   LD_LIBRARY_PATH_ENV_NAME$(1)_T_$(2)_H_$(3) := DYLD_LIBRARY_PATH
 else
-ifeq ($$(CFG_WINDOWSY_$(2)),1)
+ifeq ($$(CFG_WINDOWSY_$(3)),1)
   LD_LIBRARY_PATH_ENV_NAME$(1)_T_$(2)_H_$(3) := PATH
 else
   LD_LIBRARY_PATH_ENV_NAME$(1)_T_$(2)_H_$(3) := LD_LIBRARY_PATH

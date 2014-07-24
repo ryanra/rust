@@ -23,7 +23,7 @@
 // running tests while providing a base that other test frameworks may
 // build off of.
 
-#![crate_id = "test#0.11.0"]
+#![crate_name = "test"]
 #![experimental]
 #![comment = "Rust internal test library only used by rustc"]
 #![license = "MIT/ASL2"]
@@ -31,7 +31,7 @@
 #![crate_type = "dylib"]
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
        html_favicon_url = "http://www.rust-lang.org/favicon.ico",
-       html_root_url = "http://doc.rust-lang.org/0.11.0/")]
+       html_root_url = "http://doc.rust-lang.org/master/")]
 
 #![feature(asm, macro_rules, phase)]
 
@@ -60,7 +60,6 @@ use std::io::stdio::StdWriter;
 use std::io::{File, ChanReader, ChanWriter};
 use std::io;
 use std::os;
-use std::str;
 use std::string::String;
 use std::task::TaskBuilder;
 
@@ -368,13 +367,13 @@ pub fn parse_opts(args: &[String]) -> Option<OptRes> {
     let matches =
         match getopts::getopts(args_.as_slice(), optgroups().as_slice()) {
           Ok(m) => m,
-          Err(f) => return Some(Err(f.to_str()))
+          Err(f) => return Some(Err(f.to_string()))
         };
 
     if matches.opt_present("h") { usage(args[0].as_slice()); return None; }
 
     let filter = if matches.free.len() > 0 {
-        let s = matches.free.get(0).as_slice();
+        let s = matches.free[0].as_slice();
         match Regex::new(s) {
             Ok(re) => Some(re),
             Err(e) => return Some(Err(format!("could not parse /{}/: {}", s, e)))
@@ -474,7 +473,7 @@ pub enum TestResult {
 }
 
 enum OutputLocation<T> {
-    Pretty(Box<term::Terminal<Box<Writer + Send>> + Send>),
+    Pretty(Box<term::Terminal<term::WriterWrapper> + Send>),
     Raw(T),
 }
 
@@ -632,11 +631,11 @@ impl<T: Writer> ConsoleTestState<T> {
         let mut failures = Vec::new();
         let mut fail_out = String::new();
         for &(ref f, ref stdout) in self.failures.iter() {
-            failures.push(f.name.to_str());
+            failures.push(f.name.to_string());
             if stdout.len() > 0 {
                 fail_out.push_str(format!("---- {} stdout ----\n\t",
                                           f.name.as_slice()).as_slice());
-                let output = str::from_utf8_lossy(stdout.as_slice());
+                let output = String::from_utf8_lossy(stdout.as_slice());
                 fail_out.push_str(output.as_slice()
                                         .replace("\n", "\n\t")
                                         .as_slice());
@@ -873,7 +872,7 @@ fn should_sort_failures_before_printing_them() {
 
     st.write_failures().unwrap();
     let s = match st.out {
-        Raw(ref m) => str::from_utf8_lossy(m.get_ref()),
+        Raw(ref m) => String::from_utf8_lossy(m.get_ref()),
         Pretty(_) => unreachable!()
     };
 
@@ -1104,7 +1103,7 @@ fn calc_result(desc: &TestDesc, task_succeeded: bool) -> TestResult {
 
 impl ToJson for Metric {
     fn to_json(&self) -> json::Json {
-        let mut map = box TreeMap::new();
+        let mut map = TreeMap::new();
         map.insert("value".to_string(), json::Number(self.value));
         map.insert("noise".to_string(), json::Number(self.noise));
         json::Object(map)
@@ -1520,7 +1519,7 @@ mod tests {
         let filtered = filter_tests(&opts, tests);
 
         assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered.get(0).desc.name.to_str(),
+        assert_eq!(filtered.get(0).desc.name.to_string(),
                    "1".to_string());
         assert!(filtered.get(0).desc.ignore == false);
     }
@@ -1571,7 +1570,7 @@ mod tests {
                  "test::sort_tests".to_string());
 
         for (a, b) in expected.iter().zip(filtered.iter()) {
-            assert!(*a == b.desc.name.to_str());
+            assert!(*a == b.desc.name.to_string());
         }
     }
 

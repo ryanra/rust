@@ -12,6 +12,8 @@
 //! the standard library This varies per-platform, but these libraries are
 //! necessary for running libstd.
 
+#![experimental]
+
 // All platforms need to link to rustrt
 #[cfg(not(kernel))]
 #[link(name = "rust_builtin", kind = "static")]

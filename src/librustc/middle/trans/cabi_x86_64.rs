@@ -13,9 +13,10 @@
 
 #![allow(non_uppercase_pattern_statics)]
 
-use lib::llvm::{llvm, Integer, Pointer, Float, Double};
-use lib::llvm::{Struct, Array, Attribute};
-use lib::llvm::{StructRetAttribute, ByValAttribute, ZExtAttribute};
+use llvm;
+use llvm::{Integer, Pointer, Float, Double};
+use llvm::{Struct, Array, Attribute};
+use llvm::{StructRetAttribute, ByValAttribute, ZExtAttribute};
 use middle::trans::cabi::*;
 use middle::trans::context::CrateContext;
 use middle::trans::type_::Type;
@@ -350,7 +351,7 @@ pub fn compute_abi_info(ccx: &CrateContext,
                                 None)
             }
         } else {
-            let attr = if ty == Type::bool(ccx) { Some(ZExtAttribute) } else { None };
+            let attr = if ty == Type::i1(ccx) { Some(ZExtAttribute) } else { None };
             ArgType::direct(ty, None, None, attr)
         }
     }

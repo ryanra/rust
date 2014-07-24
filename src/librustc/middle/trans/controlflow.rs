@@ -8,7 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use lib::llvm::*;
+use llvm::*;
 use driver::config::FullDebugInfo;
 use middle::def;
 use middle::lang_items::{FailFnLangItem, FailBoundsCheckFnLangItem};
@@ -126,8 +126,8 @@ pub fn trans_if<'a>(bcx: &'a Block<'a>,
                     dest: expr::Dest)
                     -> &'a Block<'a> {
     debug!("trans_if(bcx={}, if_id={}, cond={}, thn={:?}, dest={})",
-           bcx.to_str(), if_id, bcx.expr_to_str(cond), thn.id,
-           dest.to_str(bcx.ccx()));
+           bcx.to_str(), if_id, bcx.expr_to_string(cond), thn.id,
+           dest.to_string(bcx.ccx()));
     let _icx = push_ctxt("trans_if");
     let mut bcx = bcx;
 

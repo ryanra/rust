@@ -14,16 +14,17 @@
 
 use prelude::*;
 
-use str;
 use fmt;
+use os;
 use io::{IoResult, IoError};
 use io;
 use libc;
 use mem;
-use owned::Box;
+use boxed::Box;
 use rt::rtio::{RtioProcess, ProcessConfig, IoFactory, LocalIo};
 use rt::rtio;
 use c_str::CString;
+use collections::HashMap;
 
 /// Signal a process to exit, without forcibly killing it. Corresponds to
 /// SIGTERM on unix platforms.
@@ -78,6 +79,9 @@ pub struct Process {
     pub extra_io: Vec<Option<io::PipeStream>>,
 }
 
+/// A HashMap representation of environment variables.
+pub type EnvMap = HashMap<CString, CString>;
+
 /// The `Command` type acts as a process builder, providing fine-grained control
 /// over how a new process should be spawned. A default configuration can be
 /// generated using `Command::new(program)`, where `program` gives a path to the
@@ -94,12 +98,13 @@ pub struct Process {
 ///
 /// let output = process.stdout.get_mut_ref().read_to_end();
 /// ```
+#[deriving(Clone)]
 pub struct Command {
     // The internal data for the builder. Documented by the builder
     // methods below, and serialized into rt::rtio::ProcessConfig.
     program: CString,
     args: Vec<CString>,
-    env: Option<Vec<(CString, CString)>>,
+    env: Option<EnvMap>,
     cwd: Option<CString>,
     stdin: StdioContainer,
     stdout: StdioContainer,
@@ -146,31 +151,53 @@ impl Command {
     }
 
     /// Add an argument to pass to the program.
-    pub fn arg<'a, T:ToCStr>(&'a mut self, arg: T) -> &'a mut Command {
+    pub fn arg<'a, T: ToCStr>(&'a mut self, arg: T) -> &'a mut Command {
         self.args.push(arg.to_c_str());
         self
     }
 
     /// Add multiple arguments to pass to the program.
-    pub fn args<'a, T:ToCStr>(&'a mut self, args: &[T]) -> &'a mut Command {
+    pub fn args<'a, T: ToCStr>(&'a mut self, args: &[T]) -> &'a mut Command {
         self.args.extend(args.iter().map(|arg| arg.to_c_str()));;
         self
     }
+    // Get a mutable borrow of the environment variable map for this `Command`.
+    fn get_env_map<'a>(&'a mut self) -> &'a mut EnvMap {
+        match self.env {
+            Some(ref mut map) => map,
+            None => {
+                // if the env is currently just inheriting from the parent's,
+                // materialize the parent's env into a hashtable.
+                self.env = Some(os::env_as_bytes().move_iter()
+                                   .map(|(k, v)| (k.as_slice().to_c_str(),
+                                                  v.as_slice().to_c_str()))
+                                   .collect());
+                self.env.as_mut().unwrap()
+            }
+        }
+    }
 
-    /// Sets the environment for the child process (rather than inheriting it
-    /// from the current process).
+    /// Inserts or updates an environment variable mapping.
+    pub fn env<'a, T: ToCStr, U: ToCStr>(&'a mut self, key: T, val: U)
+                                         -> &'a mut Command {
+        self.get_env_map().insert(key.to_c_str(), val.to_c_str());
+        self
+    }
 
-    // FIXME (#13851): We should change this interface to allow clients to (1)
-    // build up the env vector incrementally and (2) allow both inheriting the
-    // current process's environment AND overriding/adding additional
-    // environment variables. The underlying syscalls assume that the
-    // environment has no duplicate names, so we really want to use a hashtable
-    // to compute the environment to pass down to the syscall; resolving issue
-    // #13851 will make it possible to use the standard hashtable.
-    pub fn env<'a, T:ToCStr>(&'a mut self, env: &[(T,T)]) -> &'a mut Command {
-        self.env = Some(env.iter().map(|&(ref name, ref val)| {
-            (name.to_c_str(), val.to_c_str())
-        }).collect());
+    /// Removes an environment variable mapping.
+    pub fn env_remove<'a, T: ToCStr>(&'a mut self, key: T) -> &'a mut Command {
+        self.get_env_map().remove(&key.to_c_str());
+        self
+    }
+
+    /// Sets the entire environment map for the child process.
+    ///
+    /// If the given slice contains multiple instances of an environment
+    /// variable, the *rightmost* instance will determine the value.
+    pub fn env_set_all<'a, T: ToCStr, U: ToCStr>(&'a mut self, env: &[(T,U)])
+                                                 -> &'a mut Command {
+        self.env = Some(env.iter().map(|&(ref k, ref v)| (k.to_c_str(), v.to_c_str()))
+                                  .collect());
         self
     }
 
@@ -244,10 +271,15 @@ impl Command {
         let extra_io: Vec<rtio::StdioContainer> =
             self.extra_io.iter().map(|x| to_rtio(*x)).collect();
         LocalIo::maybe_raise(|io| {
+            let env = match self.env {
+                None => None,
+                Some(ref env_map) =>
+                    Some(env_map.iter().collect::<Vec<_>>())
+            };
             let cfg = ProcessConfig {
                 program: &self.program,
                 args: self.args.as_slice(),
-                env: self.env.as_ref().map(|env| env.as_slice()),
+                env: env.as_ref().map(|e| e.as_slice()),
                 cwd: self.cwd.as_ref(),
                 stdin: to_rtio(self.stdin),
                 stdout: to_rtio(self.stdout),
@@ -280,7 +312,6 @@ impl Command {
     ///
     /// ```
     /// use std::io::Command;
-    /// use std::str;
     ///
     /// let output = match Command::new("cat").arg("foot.txt").output() {
     ///     Ok(output) => output,
@@ -288,8 +319,8 @@ impl Command {
     /// };
     ///
     /// println!("status: {}", output.status);
-    /// println!("stdout: {}", str::from_utf8_lossy(output.output.as_slice()));
-    /// println!("stderr: {}", str::from_utf8_lossy(output.error.as_slice()));
+    /// println!("stdout: {}", String::from_utf8_lossy(output.output.as_slice()));
+    /// println!("stderr: {}", String::from_utf8_lossy(output.error.as_slice()));
     /// ```
     pub fn output(&self) -> IoResult<ProcessOutput> {
         self.spawn().and_then(|p| p.wait_with_output())
@@ -320,9 +351,9 @@ impl fmt::Show for Command {
     /// non-utf8 data is lossily converted using the utf8 replacement
     /// character.
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        try!(write!(f, "{}", str::from_utf8_lossy(self.program.as_bytes_no_nul())));
+        try!(write!(f, "{}", String::from_utf8_lossy(self.program.as_bytes_no_nul())));
         for arg in self.args.iter() {
-            try!(write!(f, " '{}'", str::from_utf8_lossy(arg.as_bytes_no_nul())));
+            try!(write!(f, " '{}'", String::from_utf8_lossy(arg.as_bytes_no_nul())));
         }
         Ok(())
     }
@@ -340,6 +371,7 @@ pub struct ProcessOutput {
 }
 
 /// Describes what to do with a standard io stream for a child process.
+#[deriving(Clone)]
 pub enum StdioContainer {
     /// This stream will be ignored. This is the equivalent of attaching the
     /// stream to `/dev/null`
@@ -615,7 +647,7 @@ mod tests {
     })
 
     pub fn read_all(input: &mut Reader) -> String {
-        input.read_to_str().unwrap()
+        input.read_to_string().unwrap()
     }
 
     pub fn run_output(cmd: Command) -> String {
@@ -779,8 +811,7 @@ mod tests {
         use os;
         let prog = pwd_cmd().spawn().unwrap();
 
-        let output = str::from_utf8(prog.wait_with_output().unwrap()
-                                        .output.as_slice()).unwrap().to_string();
+        let output = String::from_utf8(prog.wait_with_output().unwrap().output).unwrap();
         let parent_dir = os::getcwd();
         let child_dir = Path::new(output.as_slice().trim());
 
@@ -798,8 +829,7 @@ mod tests {
         let parent_dir = os::getcwd().dir_path();
         let prog = pwd_cmd().cwd(&parent_dir).spawn().unwrap();
 
-        let output = str::from_utf8(prog.wait_with_output().unwrap()
-                                        .output.as_slice()).unwrap().to_string();
+        let output = String::from_utf8(prog.wait_with_output().unwrap().output).unwrap();
         let child_dir = Path::new(output.as_slice().trim().into_string());
 
         let parent_stat = parent_dir.stat().unwrap();
@@ -833,8 +863,7 @@ mod tests {
         if running_on_valgrind() { return; }
 
         let prog = env_cmd().spawn().unwrap();
-        let output = str::from_utf8(prog.wait_with_output().unwrap()
-                                        .output.as_slice()).unwrap().to_string();
+        let output = String::from_utf8(prog.wait_with_output().unwrap().output).unwrap();
 
         let r = os::env();
         for &(ref k, ref v) in r.iter() {
@@ -850,9 +879,7 @@ mod tests {
         if running_on_valgrind() { return; }
 
         let mut prog = env_cmd().spawn().unwrap();
-        let output = str::from_utf8(prog.wait_with_output()
-                                        .unwrap().output.as_slice())
-                                   .unwrap().to_string();
+        let output = String::from_utf8(prog.wait_with_output().unwrap().output).unwrap();
 
         let r = os::env();
         for &(ref k, ref v) in r.iter() {
@@ -870,14 +897,48 @@ mod tests {
         }
     })
 
-    iotest!(fn test_add_to_env() {
+    iotest!(fn test_override_env() {
         let new_env = vec![("RUN_TEST_NEW_ENV", "123")];
-        let prog = env_cmd().env(new_env.as_slice()).spawn().unwrap();
+        let prog = env_cmd().env_set_all(new_env.as_slice()).spawn().unwrap();
+        let result = prog.wait_with_output().unwrap();
+        let output = String::from_utf8_lossy(result.output.as_slice()).into_string();
+
+        assert!(output.as_slice().contains("RUN_TEST_NEW_ENV=123"),
+                "didn't find RUN_TEST_NEW_ENV inside of:\n\n{}", output);
+    })
+
+    iotest!(fn test_add_to_env() {
+        let prog = env_cmd().env("RUN_TEST_NEW_ENV", "123").spawn().unwrap();
         let result = prog.wait_with_output().unwrap();
         let output = str::from_utf8_lossy(result.output.as_slice()).into_string();
 
         assert!(output.as_slice().contains("RUN_TEST_NEW_ENV=123"),
                 "didn't find RUN_TEST_NEW_ENV inside of:\n\n{}", output);
+    })
+
+    iotest!(fn test_remove_from_env() {
+        use os;
+
+        // save original environment
+        let old_env = os::getenv("RUN_TEST_NEW_ENV");
+
+        os::setenv("RUN_TEST_NEW_ENV", "123");
+        let prog = env_cmd().env_remove("RUN_TEST_NEW_ENV").spawn().unwrap();
+        let result = prog.wait_with_output().unwrap();
+        let output = str::from_utf8_lossy(result.output.as_slice()).into_string();
+
+        // restore original environment
+        match old_env {
+            None => {
+                os::unsetenv("RUN_TEST_NEW_ENV");
+            }
+            Some(val) => {
+                os::setenv("RUN_TEST_NEW_ENV", val.as_slice());
+            }
+        }
+
+        assert!(!output.as_slice().contains("RUN_TEST_NEW_ENV"),
+                "found RUN_TEST_NEW_ENV inside of:\n\n{}", output);
     })
 
     #[cfg(unix)]

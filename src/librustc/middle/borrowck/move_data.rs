@@ -189,7 +189,7 @@ impl MoveData {
         }
     }
 
-    fn path_loan_path(&self, index: MovePathIndex) -> Rc<LoanPath> {
+    pub fn path_loan_path(&self, index: MovePathIndex) -> Rc<LoanPath> {
         self.paths.borrow().get(index.get()).loan_path.clone()
     }
 
@@ -534,7 +534,7 @@ impl MoveData {
 impl<'a> FlowedMoveData<'a> {
     pub fn new(move_data: MoveData,
                tcx: &'a ty::ctxt,
-               cfg: &'a cfg::CFG,
+               cfg: &cfg::CFG,
                id_range: ast_util::IdRange,
                decl: &ast::FnDecl,
                body: &ast::Block)
@@ -576,7 +576,7 @@ impl<'a> FlowedMoveData<'a> {
          * Iterates through each path moved by `id`
          */
 
-        self.dfcx_moves.each_gen_bit_frozen(id, |index| {
+        self.dfcx_moves.each_gen_bit(id, |index| {
             let move = self.move_data.moves.borrow();
             let move = move.get(index);
             let moved_path = move.path;
@@ -592,7 +592,7 @@ impl<'a> FlowedMoveData<'a> {
 
         let mut ret = None;
         for loan_path_index in self.move_data.path_map.borrow().find(&*loan_path).iter() {
-            self.dfcx_moves.each_gen_bit_frozen(id, |move_index| {
+            self.dfcx_moves.each_gen_bit(id, |move_index| {
                 let move = self.move_data.moves.borrow();
                 let move = move.get(move_index);
                 if move.path == **loan_path_index {
@@ -637,7 +637,7 @@ impl<'a> FlowedMoveData<'a> {
 
         let mut ret = true;
 
-        self.dfcx_moves.each_bit_on_entry_frozen(id, |index| {
+        self.dfcx_moves.each_bit_on_entry(id, |index| {
             let move = self.move_data.moves.borrow();
             let move = move.get(index);
             let moved_path = move.path;
@@ -693,7 +693,7 @@ impl<'a> FlowedMoveData<'a> {
             }
         };
 
-        self.dfcx_assign.each_bit_on_entry_frozen(id, |index| {
+        self.dfcx_assign.each_bit_on_entry(id, |index| {
             let assignment = self.move_data.var_assignments.borrow();
             let assignment = assignment.get(index);
             if assignment.path == loan_path_index && !f(assignment) {

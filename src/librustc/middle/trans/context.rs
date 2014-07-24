@@ -10,9 +10,10 @@
 
 use driver::config::NoDebugInfo;
 use driver::session::Session;
-use lib::llvm::{ContextRef, ModuleRef, ValueRef};
-use lib::llvm::{llvm, TargetData, TypeNames};
-use lib::llvm::mk_target_data;
+use llvm;
+use llvm::{ContextRef, ModuleRef, ValueRef};
+use llvm::{TargetData};
+use llvm::mk_target_data;
 use metadata::common::LinkMeta;
 use middle::resolve;
 use middle::trans::adt;
@@ -21,7 +22,7 @@ use middle::trans::builder::Builder;
 use middle::trans::common::{ExternMap,tydesc_info,BuilderRef_res};
 use middle::trans::debuginfo;
 use middle::trans::monomorphize::MonoId;
-use middle::trans::type_::Type;
+use middle::trans::type_::{Type, TypeNames};
 use middle::ty;
 use util::sha2::Sha256;
 use util::nodemap::{NodeMap, NodeSet, DefIdMap};
@@ -116,6 +117,10 @@ pub struct CrateContext {
     pub int_type: Type,
     pub opaque_vec_type: Type,
     pub builder: BuilderRef_res,
+
+    /// Holds the LLVM values for closure IDs.
+    pub unboxed_closure_vals: RefCell<DefIdMap<ValueRef>>,
+
     /// Set when at least one function uses GC. Needed so that
     /// decl_gc_metadata knows whether to link to the module metadata, which
     /// is not emitted by LLVM's GC pass when no functions use GC.
@@ -221,9 +226,10 @@ impl CrateContext {
                     llvm_insns: RefCell::new(HashMap::new()),
                     fn_stats: RefCell::new(Vec::new()),
                 },
-                int_type: Type::from_ref(ptr::null()),
-                opaque_vec_type: Type::from_ref(ptr::null()),
+                int_type: Type::from_ref(ptr::mut_null()),
+                opaque_vec_type: Type::from_ref(ptr::mut_null()),
                 builder: BuilderRef_res(llvm::LLVMCreateBuilderInContext(llcx)),
+                unboxed_closure_vals: RefCell::new(DefIdMap::new()),
                 uses_gc: false,
                 dbg_cx: dbg_cx,
                 eh_personality: RefCell::new(None),

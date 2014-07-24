@@ -15,8 +15,8 @@
 
 use back::abi;
 use back::link::*;
-use lib::llvm::{llvm, ValueRef, True};
-use lib;
+use llvm::{ValueRef, True, get_param};
+use llvm;
 use middle::lang_items::{FreeFnLangItem, ExchangeFreeFnLangItem};
 use middle::subst;
 use middle::trans::adt;
@@ -167,44 +167,23 @@ pub fn lazily_emit_visit_glue(ccx: &CrateContext, ti: &tydesc_info) -> ValueRef 
     match ti.visit_glue.get() {
         Some(visit_glue) => visit_glue,
         None => {
-            debug!("+++ lazily_emit_tydesc_glue VISIT {}", ppaux::ty_to_str(ccx.tcx(), ti.ty));
+            debug!("+++ lazily_emit_tydesc_glue VISIT {}", ppaux::ty_to_string(ccx.tcx(), ti.ty));
             let glue_fn = declare_generic_glue(ccx, ti.ty, llfnty, "visit");
             ti.visit_glue.set(Some(glue_fn));
             make_generic_glue(ccx, ti.ty, glue_fn, make_visit_glue, "visit");
-            debug!("--- lazily_emit_tydesc_glue VISIT {}", ppaux::ty_to_str(ccx.tcx(), ti.ty));
+            debug!("--- lazily_emit_tydesc_glue VISIT {}", ppaux::ty_to_string(ccx.tcx(), ti.ty));
             glue_fn
         }
     }
 }
 
 // See [Note-arg-mode]
-pub fn call_visit_glue(bcx: &Block, v: ValueRef, tydesc: ValueRef,
-                       static_ti: Option<&tydesc_info>) {
-    let _icx = push_ctxt("call_tydesc_glue_full");
-    let ccx = bcx.ccx();
-    // NB: Don't short-circuit even if this block is unreachable because
-    // GC-based cleanup needs to the see that the roots are live.
-    if bcx.unreachable.get() && !ccx.sess().no_landing_pads() { return; }
+pub fn call_visit_glue(bcx: &Block, v: ValueRef, tydesc: ValueRef) {
+    let _icx = push_ctxt("call_visit_glue");
 
-    let static_glue_fn = static_ti.map(|sti| lazily_emit_visit_glue(ccx, sti));
-
-    // When static type info is available, avoid casting to a generic pointer.
-    let llrawptr = if static_glue_fn.is_none() {
-        PointerCast(bcx, v, Type::i8p(ccx))
-    } else {
-        v
-    };
-
-    let llfn = {
-        match static_glue_fn {
-            None => {
-                // Select out the glue function to call from the tydesc
-                let llfnptr = GEPi(bcx, tydesc, [0u, abi::tydesc_field_visit_glue]);
-                Load(bcx, llfnptr)
-            }
-            Some(sgf) => sgf
-        }
-    };
+    // Select the glue function to call from the tydesc
+    let llfn = Load(bcx, GEPi(bcx, tydesc, [0u, abi::tydesc_field_visit_glue]));
+    let llrawptr = PointerCast(bcx, v, Type::i8p(bcx.ccx()));
 
     Call(bcx, llfn, [llrawptr], []);
 }
@@ -234,7 +213,7 @@ fn trans_struct_drop_flag<'a>(bcx: &'a Block<'a>,
                               -> &'a Block<'a> {
     let repr = adt::represent_type(bcx.ccx(), t);
     let drop_flag = adt::trans_drop_flag_ptr(bcx, &*repr, v0);
-    with_cond(bcx, IsNotNull(bcx, Load(bcx, drop_flag)), |cx| {
+    with_cond(bcx, load_ty(bcx, drop_flag, ty::mk_bool()), |cx| {
         trans_struct_drop(cx, t, v0, dtor_did, class_did, substs)
     })
 }
@@ -353,6 +332,7 @@ fn make_drop_glue<'a>(bcx: &'a Block<'a>, v0: ValueRef, t: ty::t) -> &'a Block<'
                 }
             }
         }
+        ty::ty_unboxed_closure(..) => iter_structural_ty(bcx, v0, t, drop_ty),
         ty::ty_closure(ref f) if f.store == ty::UniqTraitStore => {
             let box_cell_v = GEPi(bcx, v0, [0u, abi::fn_field_box]);
             let env = Load(bcx, box_cell_v);
@@ -432,13 +412,13 @@ pub fn declare_tydesc(ccx: &CrateContext, t: ty::t) -> tydesc_info {
 
     if ccx.sess().count_type_sizes() {
         println!("{}\t{}", llsize_of_real(ccx, llty),
-                 ppaux::ty_to_str(ccx.tcx(), t));
+                 ppaux::ty_to_string(ccx.tcx(), t));
     }
 
     let llsize = llsize_of(ccx, llty);
     let llalign = llalign_of(ccx, llty);
     let name = mangle_internal_name_by_type_and_seq(ccx, t, "tydesc");
-    debug!("+++ declare_tydesc {} {}", ppaux::ty_to_str(ccx.tcx(), t), name);
+    debug!("+++ declare_tydesc {} {}", ppaux::ty_to_string(ccx.tcx(), t), name);
     let gvar = name.as_slice().with_c_str(|buf| {
         unsafe {
             llvm::LLVMAddGlobal(ccx.llmod, ccx.tydesc_type().to_ref(), buf)
@@ -447,10 +427,10 @@ pub fn declare_tydesc(ccx: &CrateContext, t: ty::t) -> tydesc_info {
     note_unique_llvm_symbol(ccx, name);
 
     let ty_name = token::intern_and_get_ident(
-        ppaux::ty_to_str(ccx.tcx(), t).as_slice());
+        ppaux::ty_to_string(ccx.tcx(), t).as_slice());
     let ty_name = C_str_slice(ccx, ty_name);
 
-    debug!("--- declare_tydesc {}", ppaux::ty_to_str(ccx.tcx(), t));
+    debug!("--- declare_tydesc {}", ppaux::ty_to_string(ccx.tcx(), t));
     tydesc_info {
         ty: t,
         tydesc: gvar,
@@ -468,7 +448,7 @@ fn declare_generic_glue(ccx: &CrateContext, t: ty::t, llfnty: Type,
         ccx,
         t,
         format!("glue_{}", name).as_slice());
-    debug!("{} is for type {}", fn_nm, ppaux::ty_to_str(ccx.tcx(), t));
+    debug!("{} is for type {}", fn_nm, ppaux::ty_to_string(ccx.tcx(), t));
     let llfn = decl_cdecl_fn(ccx, fn_nm.as_slice(), llfnty, ty::mk_nil());
     note_unique_llvm_symbol(ccx, fn_nm);
     return llfn;
@@ -490,9 +470,9 @@ fn make_generic_glue(ccx: &CrateContext,
     let fcx = new_fn_ctxt(ccx, llfn, -1, false, ty::mk_nil(),
                           &empty_param_substs, None, &arena);
 
-    init_function(&fcx, false, ty::mk_nil());
+    let bcx = init_function(&fcx, false, ty::mk_nil());
 
-    lib::llvm::SetLinkage(llfn, lib::llvm::InternalLinkage);
+    llvm::SetLinkage(llfn, llvm::InternalLinkage);
     ccx.stats.n_glues_created.set(ccx.stats.n_glues_created.get() + 1u);
     // All glue functions take values passed *by alias*; this is a
     // requirement since in many contexts glue is invoked indirectly and
@@ -502,10 +482,9 @@ fn make_generic_glue(ccx: &CrateContext,
     // llfn is expected be declared to take a parameter of the appropriate
     // type, so we don't need to explicitly cast the function parameter.
 
-    let bcx = fcx.entry_bcx.borrow().clone().unwrap();
-    let llrawptr0 = unsafe { llvm::LLVMGetParam(llfn, fcx.arg_pos(0) as c_uint) };
+    let llrawptr0 = get_param(llfn, fcx.arg_pos(0) as c_uint);
     let bcx = helper(bcx, llrawptr0, t);
-    finish_fn(&fcx, bcx);
+    finish_fn(&fcx, bcx, ty::mk_nil());
 
     llfn
 }
@@ -551,7 +530,7 @@ pub fn emit_tydescs(ccx: &CrateContext) {
             let gvar = ti.tydesc;
             llvm::LLVMSetInitializer(gvar, tydesc);
             llvm::LLVMSetGlobalConstant(gvar, True);
-            lib::llvm::SetLinkage(gvar, lib::llvm::InternalLinkage);
+            llvm::SetLinkage(gvar, llvm::InternalLinkage);
         }
     };
 }

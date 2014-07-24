@@ -9,10 +9,10 @@
 // except according to those terms.
 
 
-fn view<'r, T>(x: &'r [T]) -> &'r [T] {x}
+fn view<T>(x: &[T]) -> &[T] {x}
 
 pub fn main() {
-    let v = vec!(1, 2, 3);
+    let v = vec!(1i, 2, 3);
     let x = view(v.as_slice());
     let y = view(x.as_slice());
     assert!((*v.get(0) == x[0]) && (*v.get(0) == y[0]));

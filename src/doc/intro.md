@@ -133,7 +133,7 @@ Check it out:
 ```
 
 fn dangling() -> Box<int> {
-    let i = box 1234;
+    let i = box 1234i;
     return i;
 }
 
@@ -143,8 +143,8 @@ fn add_one() -> int {
 }
 ```
 
-Now instead of a stack allocated `1234`,
-we have a heap allocated `box 1234`.
+Now instead of a stack allocated `1234i`,
+we have a heap allocated `box 1234i`.
 Whereas `&` borrows a pointer to existing memory,
 creating an owned box allocates memory on the heap and places a value in it,
 giving you the sole pointer to that memory.
@@ -152,7 +152,7 @@ You can roughly compare these two lines:
 
 ```
 // Rust
-let i = box 1234;
+let i = box 1234i;
 ```
 
 ```cpp
@@ -205,7 +205,7 @@ fn main() {
 
     spawn(proc() {
         let numbers = rx.recv();
-        println!("{}", *numbers.get(0));
+        println!("{}", numbers[0]);
     })
 }
 ```
@@ -244,19 +244,19 @@ fn main() {
 
     spawn(proc() {
         let numbers = rx.recv();
-        println!("{}", numbers.get(0));
+        println!("{}", numbers[0]);
     });
 
     // Try to print a number from the original task
-    println!("{}", *numbers.get(0));
+    println!("{}", numbers[0]);
 }
 ```
 
-This will result an error indicating that the value is no longer in scope:
+The compiler will produce an error indicating that the value is no longer in scope:
 
 ```text
 concurrency.rs:12:20: 12:27 error: use of moved value: 'numbers'
-concurrency.rs:12     println!("{}", numbers.get(0));
+concurrency.rs:12     println!("{}", numbers[0]);
                                      ^~~~~~~
 ```
 
@@ -276,7 +276,7 @@ fn main() {
 
         spawn(proc() {
             let numbers = rx.recv();
-            println!("{:d}", *numbers.get(num as uint));
+            println!("{:d}", numbers[num as uint]);
         })
     }
 }
@@ -309,7 +309,7 @@ fn main() {
 
         spawn(proc() {
             let numbers = rx.recv();
-            println!("{:d}", *numbers.get(num as uint));
+            println!("{:d}", (*numbers)[num as uint]);
         })
     }
 }
@@ -364,7 +364,7 @@ fn main() {
             // See: https://github.com/rust-lang/rust/issues/6515
             *numbers.get_mut(num as uint) = *numbers.get_mut(num as uint) + 1;
 
-            println!("{}", *numbers.get(num as uint));
+            println!("{}", (*numbers)[num as uint]);
 
             // When `numbers` goes out of scope the lock is dropped
         })

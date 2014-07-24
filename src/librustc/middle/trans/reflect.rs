@@ -9,7 +9,7 @@
 // except according to those terms.
 
 use back::link::mangle_internal_name_by_path_and_seq;
-use lib::llvm::{ValueRef, llvm};
+use llvm::{ValueRef, get_param};
 use middle::trans::adt;
 use middle::trans::base::*;
 use middle::trans::build::*;
@@ -23,7 +23,7 @@ use middle::trans::meth;
 use middle::trans::type_::Type;
 use middle::trans::type_of::*;
 use middle::ty;
-use util::ppaux::ty_to_str;
+use util::ppaux::ty_to_string;
 
 use std::rc::Rc;
 use arena::TypedArena;
@@ -98,7 +98,7 @@ impl<'a, 'b> Reflector<'a, 'b> {
         debug!("passing {} args:", args.len());
         let mut bcx = self.bcx;
         for (i, a) in args.iter().enumerate() {
-            debug!("arg {}: {}", i, bcx.val_to_str(*a));
+            debug!("arg {}: {}", i, bcx.val_to_string(*a));
         }
         let result = unpack_result!(bcx, callee::trans_call_inner(
             self.bcx, None, mth_ty,
@@ -129,7 +129,7 @@ impl<'a, 'b> Reflector<'a, 'b> {
     pub fn visit_ty(&mut self, t: ty::t) {
         let bcx = self.bcx;
         let tcx = bcx.tcx();
-        debug!("reflect::visit_ty {}", ty_to_str(bcx.tcx(), t));
+        debug!("reflect::visit_ty {}", ty_to_string(bcx.tcx(), t));
 
         match ty::get(t).sty {
           ty::ty_bot => self.leaf("bot"),
@@ -175,7 +175,7 @@ impl<'a, 'b> Reflector<'a, 'b> {
                   ty::ty_trait(..) => {
                       let extra = [
                           self.c_slice(token::intern_and_get_ident(
-                                  ty_to_str(tcx, t).as_slice()))
+                                  ty_to_string(tcx, t).as_slice()))
                       ];
                       self.visit("trait", extra);
                   }
@@ -204,7 +204,7 @@ impl<'a, 'b> Reflector<'a, 'b> {
                   ty::ty_trait(..) => {
                       let extra = [
                           self.c_slice(token::intern_and_get_ident(
-                                  ty_to_str(tcx, t).as_slice()))
+                                  ty_to_string(tcx, t).as_slice()))
                       ];
                       self.visit("trait", extra);
                   }
@@ -269,7 +269,7 @@ impl<'a, 'b> Reflector<'a, 'b> {
 
               let extra = (vec!(
                   self.c_slice(
-                      token::intern_and_get_ident(ty_to_str(tcx,
+                      token::intern_and_get_ident(ty_to_string(tcx,
                                                             t).as_slice())),
                   self.c_bool(named_fields),
                   self.c_uint(fields.len())
@@ -313,17 +313,12 @@ impl<'a, 'b> Reflector<'a, 'b> {
                 let fcx = new_fn_ctxt(ccx, llfdecl, -1, false,
                                       ty::mk_u64(), &empty_param_substs,
                                       None, &arena);
-                init_function(&fcx, false, ty::mk_u64());
+                let bcx = init_function(&fcx, false, ty::mk_u64());
 
-                let arg = unsafe {
-                    //
-                    // we know the return type of llfdecl is an int here, so
-                    // no need for a special check to see if the return type
-                    // is immediate.
-                    //
-                    llvm::LLVMGetParam(llfdecl, fcx.arg_pos(0u) as c_uint)
-                };
-                let bcx = fcx.entry_bcx.borrow().clone().unwrap();
+                // we know the return type of llfdecl is an int here, so
+                // no need for a special check to see if the return type
+                // is immediate.
+                let arg = get_param(llfdecl, fcx.arg_pos(0u) as c_uint);
                 let arg = BitCast(bcx, arg, llptrty);
                 let ret = adt::trans_get_discr(bcx, &*repr, arg, Some(Type::i64(ccx)));
                 Store(bcx, ret, fcx.llretptr.get().unwrap());
@@ -331,7 +326,7 @@ impl<'a, 'b> Reflector<'a, 'b> {
                     Some(llreturn) => Br(bcx, llreturn),
                     None => {}
                 };
-                finish_fn(&fcx, bcx);
+                finish_fn(&fcx, bcx, ty::mk_u64());
                 llfdecl
             };
 
@@ -366,6 +361,7 @@ impl<'a, 'b> Reflector<'a, 'b> {
           // Miscellaneous extra types
           ty::ty_infer(_) => self.leaf("infer"),
           ty::ty_err => self.leaf("err"),
+          ty::ty_unboxed_closure(..) => self.leaf("err"),
           ty::ty_param(ref p) => {
               let extra = vec!(self.c_uint(p.idx));
               self.visit("param", extra.as_slice())

@@ -8,6 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use abi::Abi;
 use ast::*;
 use ast;
 use ast_util;
@@ -33,12 +34,6 @@ pub fn path_name_i(idents: &[Ident]) -> String {
     }).collect::<Vec<String>>().connect("::")
 }
 
-// totally scary function: ignores all but the last element, should have
-// a different name
-pub fn path_to_ident(path: &Path) -> Ident {
-    path.segments.last().unwrap().identifier
-}
-
 pub fn local_def(id: NodeId) -> DefId {
     ast::DefId { krate: LOCAL_CRATE, node: id }
 }
@@ -54,7 +49,7 @@ pub fn stmt_id(s: &Stmt) -> NodeId {
     }
 }
 
-pub fn binop_to_str(op: BinOp) -> &'static str {
+pub fn binop_to_string(op: BinOp) -> &'static str {
     match op {
         BiAdd => "+",
         BiSub => "-",
@@ -93,7 +88,7 @@ pub fn is_shift_binop(b: BinOp) -> bool {
     }
 }
 
-pub fn unop_to_str(op: UnOp) -> &'static str {
+pub fn unop_to_string(op: UnOp) -> &'static str {
     match op {
       UnBox => "box(GC) ",
       UnUniq => "box() ",
@@ -107,9 +102,9 @@ pub fn is_path(e: Gc<Expr>) -> bool {
     return match e.node { ExprPath(_) => true, _ => false };
 }
 
-// Get a string representation of a signed int type, with its value.
-// We want to avoid "45int" and "-3int" in favor of "45" and "-3"
-pub fn int_ty_to_str(t: IntTy, val: Option<i64>) -> String {
+/// Get a string representation of a signed int type, with its value.
+/// We want to avoid "45int" and "-3int" in favor of "45" and "-3"
+pub fn int_ty_to_string(t: IntTy, val: Option<i64>) -> String {
     let s = match t {
         TyI if val.is_some() => "i",
         TyI => "int",
@@ -137,9 +132,9 @@ pub fn int_ty_max(t: IntTy) -> u64 {
     }
 }
 
-// Get a string representation of an unsigned int type, with its value.
-// We want to avoid "42uint" in favor of "42u"
-pub fn uint_ty_to_str(t: UintTy, val: Option<u64>) -> String {
+/// Get a string representation of an unsigned int type, with its value.
+/// We want to avoid "42uint" in favor of "42u"
+pub fn uint_ty_to_string(t: UintTy, val: Option<u64>) -> String {
     let s = match t {
         TyU if val.is_some() => "u",
         TyU => "uint",
@@ -164,7 +159,7 @@ pub fn uint_ty_max(t: UintTy) -> u64 {
     }
 }
 
-pub fn float_ty_to_str(t: FloatTy) -> String {
+pub fn float_ty_to_string(t: FloatTy) -> String {
     match t {
         TyF32 => "f32".to_string(),
         TyF64 => "f64".to_string(),
@@ -186,6 +181,8 @@ pub fn block_from_expr(e: Gc<Expr>) -> P<Block> {
     })
 }
 
+// convert a span and an identifier to the corresponding
+// 1-segment path
 pub fn ident_to_path(s: Span, identifier: Ident) -> Path {
     ast::Path {
         span: s,
@@ -202,7 +199,7 @@ pub fn ident_to_path(s: Span, identifier: Ident) -> Path {
 
 pub fn ident_to_pat(id: NodeId, s: Span, i: Ident) -> Gc<Pat> {
     box(GC) ast::Pat { id: id,
-                node: PatIdent(BindByValue(MutImmutable), ident_to_path(s, i), None),
+                node: PatIdent(BindByValue(MutImmutable), codemap::Spanned{span:s, node:i}, None),
                 span: s }
 }
 
@@ -233,43 +230,50 @@ pub fn unguarded_pat(a: &Arm) -> Option<Vec<Gc<Pat>>> {
 /// listed as `__extensions__::method_name::hash`, with no indication
 /// of the type).
 pub fn impl_pretty_name(trait_ref: &Option<TraitRef>, ty: &Ty) -> Ident {
-    let mut pretty = pprust::ty_to_str(ty);
+    let mut pretty = pprust::ty_to_string(ty);
     match *trait_ref {
         Some(ref trait_ref) => {
             pretty.push_char('.');
-            pretty.push_str(pprust::path_to_str(&trait_ref.path).as_slice());
+            pretty.push_str(pprust::path_to_string(&trait_ref.path).as_slice());
         }
         None => {}
     }
     token::gensym_ident(pretty.as_slice())
 }
 
-pub fn public_methods(ms: Vec<Gc<Method>> ) -> Vec<Gc<Method>> {
-    ms.move_iter().filter(|m| {
-        match m.vis {
-            Public => true,
-            _   => false
-        }
-    }).collect()
-}
-
-// extract a TypeMethod from a TraitMethod. if the TraitMethod is
-// a default, pull out the useful fields to make a TypeMethod
+/// extract a TypeMethod from a TraitMethod. if the TraitMethod is
+/// a default, pull out the useful fields to make a TypeMethod
+//
+// NB: to be used only after expansion is complete, and macros are gone.
 pub fn trait_method_to_ty_method(method: &TraitMethod) -> TypeMethod {
     match *method {
         Required(ref m) => (*m).clone(),
-        Provided(ref m) => {
-            TypeMethod {
-                ident: m.ident,
-                attrs: m.attrs.clone(),
-                fn_style: m.fn_style,
-                decl: m.decl,
-                generics: m.generics.clone(),
-                explicit_self: m.explicit_self,
-                id: m.id,
-                span: m.span,
-                vis: m.vis,
+        Provided(m) => {
+            match m.node {
+                MethDecl(ident,
+                         ref generics,
+                         abi,
+                         explicit_self,
+                         fn_style,
+                         decl,
+                         _,
+                         vis) => {
+                    TypeMethod {
+                        ident: ident,
+                        attrs: m.attrs.clone(),
+                        fn_style: fn_style,
+                        decl: decl,
+                        generics: generics.clone(),
+                        explicit_self: explicit_self,
+                        id: m.id,
+                        span: m.span,
+                        vis: vis,
+                        abi: abi,
+                    }
+                },
+                MethMac(_) => fail!("expected non-macro method declaration")
             }
+
         }
     }
 }
@@ -350,6 +354,9 @@ pub trait IdVisitingOperation {
     fn visit_id(&self, node_id: NodeId);
 }
 
+/// A visitor that applies its operation to all of the node IDs
+/// in a visitable thing.
+
 pub struct IdVisitor<'a, O> {
     pub operation: &'a O,
     pub pass_through_items: bool,
@@ -398,7 +405,7 @@ impl<'a, O: IdVisitingOperation> Visitor<()> for IdVisitor<'a, O> {
                     ViewPathList(_, ref paths, node_id) => {
                         self.operation.visit_id(node_id);
                         for path in paths.iter() {
-                            self.operation.visit_id(path.node.id)
+                            self.operation.visit_id(path.node.id())
                         }
                     }
                 }
@@ -615,18 +622,18 @@ pub fn walk_pat(pat: &Pat, it: |&Pat| -> bool) -> bool {
     match pat.node {
         PatIdent(_, _, Some(ref p)) => walk_pat(&**p, it),
         PatStruct(_, ref fields, _) => {
-            fields.iter().advance(|f| walk_pat(&*f.pat, |p| it(p)))
+            fields.iter().all(|field| walk_pat(&*field.pat, |p| it(p)))
         }
         PatEnum(_, Some(ref s)) | PatTup(ref s) => {
-            s.iter().advance(|p| walk_pat(&**p, |p| it(p)))
+            s.iter().all(|p| walk_pat(&**p, |p| it(p)))
         }
         PatBox(ref s) | PatRegion(ref s) => {
             walk_pat(&**s, it)
         }
         PatVec(ref before, ref slice, ref after) => {
-            before.iter().advance(|p| walk_pat(&**p, |p| it(p))) &&
-                slice.iter().advance(|p| walk_pat(&**p, |p| it(p))) &&
-                after.iter().advance(|p| walk_pat(&**p, |p| it(p)))
+            before.iter().all(|p| walk_pat(&**p, |p| it(p))) &&
+            slice.iter().all(|p| walk_pat(&**p, |p| it(p))) &&
+            after.iter().all(|p| walk_pat(&**p, |p| it(p)))
         }
         PatMac(_) => fail!("attempted to analyze unexpanded pattern"),
         PatWild | PatWildMulti | PatLit(_) | PatRange(_, _) | PatIdent(_, _, _) |
@@ -709,7 +716,7 @@ pub fn segments_name_eq(a : &[ast::PathSegment], b : &[ast::PathSegment]) -> boo
     }
 }
 
-// Returns true if this literal is a string and false otherwise.
+/// Returns true if this literal is a string and false otherwise.
 pub fn lit_is_str(lit: Gc<Lit>) -> bool {
     match lit.node {
         LitStr(..) => true,
@@ -744,6 +751,48 @@ pub fn static_has_significant_address(mutbl: ast::Mutability,
     inline == InlineNever || inline == InlineNone
 }
 
+/// Macro invocations are guaranteed not to occur after expansion is complete.
+/// Extracting fields of a method requires a dynamic check to make sure that it's
+/// not a macro invocation. This check is guaranteed to succeed, assuming
+/// that the invocations are indeed gone.
+pub trait PostExpansionMethod {
+    fn pe_ident(&self) -> ast::Ident;
+    fn pe_generics<'a>(&'a self) -> &'a ast::Generics;
+    fn pe_abi(&self) -> Abi;
+    fn pe_explicit_self<'a>(&'a self) -> &'a ast::ExplicitSelf;
+    fn pe_fn_style(&self) -> ast::FnStyle;
+    fn pe_fn_decl(&self) -> P<ast::FnDecl>;
+    fn pe_body(&self) -> P<ast::Block>;
+    fn pe_vis(&self) -> ast::Visibility;
+}
+
+macro_rules! mf_method{
+    ($meth_name:ident, $field_ty:ty, $field_pat:pat, $result:ident) => {
+        fn $meth_name<'a>(&'a self) -> $field_ty {
+            match self.node {
+                $field_pat => $result,
+                MethMac(_) => {
+                    fail!("expected an AST without macro invocations");
+                }
+            }
+        }
+    }
+}
+
+
+impl PostExpansionMethod for Method {
+    mf_method!(pe_ident,ast::Ident,MethDecl(ident,_,_,_,_,_,_,_),ident)
+    mf_method!(pe_generics,&'a ast::Generics,
+               MethDecl(_,ref generics,_,_,_,_,_,_),generics)
+    mf_method!(pe_abi,Abi,MethDecl(_,_,abi,_,_,_,_,_),abi)
+    mf_method!(pe_explicit_self,&'a ast::ExplicitSelf,
+               MethDecl(_,_,_,ref explicit_self,_,_,_,_),explicit_self)
+    mf_method!(pe_fn_style,ast::FnStyle,MethDecl(_,_,_,_,fn_style,_,_,_),fn_style)
+    mf_method!(pe_fn_decl,P<ast::FnDecl>,MethDecl(_,_,_,_,_,decl,_,_),decl)
+    mf_method!(pe_body,P<ast::Block>,MethDecl(_,_,_,_,_,_,body,_),body)
+    mf_method!(pe_vis,ast::Visibility,MethDecl(_,_,_,_,_,_,_,vis),vis)
+}
+
 #[cfg(test)]
 mod test {
     use ast::*;
@@ -758,14 +807,14 @@ mod test {
 
     #[test] fn idents_name_eq_test() {
         assert!(segments_name_eq(
-            [Ident{name:3,ctxt:4}, Ident{name:78,ctxt:82}]
+            [Ident{name:Name(3),ctxt:4}, Ident{name:Name(78),ctxt:82}]
                 .iter().map(ident_to_segment).collect::<Vec<PathSegment>>().as_slice(),
-            [Ident{name:3,ctxt:104}, Ident{name:78,ctxt:182}]
+            [Ident{name:Name(3),ctxt:104}, Ident{name:Name(78),ctxt:182}]
                 .iter().map(ident_to_segment).collect::<Vec<PathSegment>>().as_slice()));
         assert!(!segments_name_eq(
-            [Ident{name:3,ctxt:4}, Ident{name:78,ctxt:82}]
+            [Ident{name:Name(3),ctxt:4}, Ident{name:Name(78),ctxt:82}]
                 .iter().map(ident_to_segment).collect::<Vec<PathSegment>>().as_slice(),
-            [Ident{name:3,ctxt:104}, Ident{name:77,ctxt:182}]
+            [Ident{name:Name(3),ctxt:104}, Ident{name:Name(77),ctxt:182}]
                 .iter().map(ident_to_segment).collect::<Vec<PathSegment>>().as_slice()));
     }
 }

@@ -8,18 +8,18 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use back::archive::{Archive, METADATA_FILENAME};
-use back::rpath;
-use back::svh::Svh;
-use driver::driver::{CrateTranslation, OutputFilenames};
+use super::archive::{Archive, ArchiveConfig, METADATA_FILENAME};
+use super::rpath;
+use super::rpath::RPathConfig;
+use super::svh::Svh;
+use driver::driver::{CrateTranslation, OutputFilenames, Input, FileInput};
 use driver::config::NoDebugInfo;
 use driver::session::Session;
 use driver::config;
-use lib::llvm::llvm;
-use lib::llvm::ModuleRef;
-use lib;
+use llvm;
+use llvm::ModuleRef;
 use metadata::common::LinkMeta;
-use metadata::{encoder, cstore, filesearch, csearch, loader};
+use metadata::{encoder, cstore, filesearch, csearch, loader, creader};
 use middle::trans::context::CrateContext;
 use middle::trans::common::gensym_name;
 use middle::ty;
@@ -29,6 +29,7 @@ use util::sha2::{Digest, Sha256};
 
 use std::c_str::{ToCStr, CString};
 use std::char;
+use std::collections::HashSet;
 use std::io::{fs, TempDir, Command};
 use std::io;
 use std::ptr;
@@ -40,9 +41,8 @@ use syntax::abi;
 use syntax::ast;
 use syntax::ast_map::{PathElem, PathElems, PathName};
 use syntax::ast_map;
-use syntax::attr;
 use syntax::attr::AttrMetaMethods;
-use syntax::crateid::CrateId;
+use syntax::codemap::Span;
 use syntax::parse::token;
 
 #[deriving(Clone, PartialEq, PartialOrd, Ord, Eq)]
@@ -61,7 +61,7 @@ pub fn llvm_err(sess: &Session, msg: String) -> ! {
             sess.fatal(msg.as_slice());
         } else {
             let err = CString::new(cstr, true);
-            let err = str::from_utf8_lossy(err.as_bytes());
+            let err = String::from_utf8_lossy(err.as_bytes());
             sess.fatal(format!("{}: {}",
                                msg.as_slice(),
                                err.as_slice()).as_slice());
@@ -71,11 +71,11 @@ pub fn llvm_err(sess: &Session, msg: String) -> ! {
 
 pub fn write_output_file(
         sess: &Session,
-        target: lib::llvm::TargetMachineRef,
-        pm: lib::llvm::PassManagerRef,
+        target: llvm::TargetMachineRef,
+        pm: llvm::PassManagerRef,
         m: ModuleRef,
         output: &Path,
-        file_type: lib::llvm::FileType) {
+        file_type: llvm::FileType) {
     unsafe {
         output.with_c_str(|output| {
             let result = llvm::LLVMRustWriteOutputFile(
@@ -89,18 +89,17 @@ pub fn write_output_file(
 
 pub mod write {
 
-    use back::lto;
-    use back::link::{write_output_file, OutputType};
-    use back::link::{OutputTypeAssembly, OutputTypeBitcode};
-    use back::link::{OutputTypeExe, OutputTypeLlvmAssembly};
-    use back::link::{OutputTypeObject};
+    use super::super::lto;
+    use super::{write_output_file, OutputType};
+    use super::{OutputTypeAssembly, OutputTypeBitcode};
+    use super::{OutputTypeExe, OutputTypeLlvmAssembly};
+    use super::{OutputTypeObject};
     use driver::driver::{CrateTranslation, OutputFilenames};
     use driver::config::NoDebugInfo;
     use driver::session::Session;
     use driver::config;
-    use lib::llvm::llvm;
-    use lib::llvm::{ModuleRef, TargetMachineRef, PassManagerRef};
-    use lib;
+    use llvm;
+    use llvm::{ModuleRef, TargetMachineRef, PassManagerRef};
     use util::common::time;
     use syntax::abi;
 
@@ -119,7 +118,7 @@ pub mod write {
     // get all hardware potential via VFP3 (hardware floating point)
     // and NEON (SIMD) instructions supported by LLVM.
     // Note that without those flags various linking errors might
-    // arise as some of intrinsicts are converted into function calls
+    // arise as some of intrinsics are converted into function calls
     // and nobody provides implementations those functions
     fn target_feature<'a>(sess: &'a Session) -> &'a str {
         match sess.targ_cfg.os {
@@ -153,10 +152,10 @@ pub mod write {
             }
 
             let opt_level = match sess.opts.optimize {
-              config::No => lib::llvm::CodeGenLevelNone,
-              config::Less => lib::llvm::CodeGenLevelLess,
-              config::Default => lib::llvm::CodeGenLevelDefault,
-              config::Aggressive => lib::llvm::CodeGenLevelAggressive,
+              config::No => llvm::CodeGenLevelNone,
+              config::Less => llvm::CodeGenLevelLess,
+              config::Default => llvm::CodeGenLevelDefault,
+              config::Aggressive => llvm::CodeGenLevelAggressive,
             };
             let use_softfp = sess.opts.cg.soft_float;
 
@@ -173,15 +172,31 @@ pub mod write {
             let fdata_sections = ffunction_sections;
 
             let reloc_model = match sess.opts.cg.relocation_model.as_slice() {
-                "pic" => lib::llvm::RelocPIC,
-                "static" => lib::llvm::RelocStatic,
-                "default" => lib::llvm::RelocDefault,
-                "dynamic-no-pic" => lib::llvm::RelocDynamicNoPic,
+                "pic" => llvm::RelocPIC,
+                "static" => llvm::RelocStatic,
+                "default" => llvm::RelocDefault,
+                "dynamic-no-pic" => llvm::RelocDynamicNoPic,
                 _ => {
                     sess.err(format!("{} is not a valid relocation mode",
                                      sess.opts
                                          .cg
                                          .relocation_model).as_slice());
+                    sess.abort_if_errors();
+                    return;
+                }
+            };
+
+            let code_model = match sess.opts.cg.code_model.as_slice() {
+                "default" => llvm::CodeModelDefault,
+                "small" => llvm::CodeModelSmall,
+                "kernel" => llvm::CodeModelKernel,
+                "medium" => llvm::CodeModelMedium,
+                "large" => llvm::CodeModelLarge,
+                _ => {
+                    sess.err(format!("{} is not a valid code model",
+                                     sess.opts
+                                         .cg
+                                         .code_model).as_slice());
                     sess.abort_if_errors();
                     return;
                 }
@@ -196,7 +211,7 @@ pub mod write {
                     target_feature(sess).with_c_str(|features| {
                         llvm::LLVMRustCreateTargetMachine(
                             t, cpu, features,
-                            lib::llvm::CodeModelDefault,
+                            code_model,
                             reloc_model,
                             opt_level,
                             true /* EnableSegstk */,
@@ -321,7 +336,7 @@ pub mod write {
                         };
                         with_codegen(tm, llmod, trans.no_builtins, |cpm| {
                             write_output_file(sess, tm, cpm, llmod, &path,
-                                            lib::llvm::AssemblyFile);
+                                            llvm::AssemblyFile);
                         });
                     }
                     OutputTypeObject => {
@@ -339,7 +354,7 @@ pub mod write {
                     Some(ref path) => {
                         with_codegen(tm, llmod, trans.no_builtins, |cpm| {
                             write_output_file(sess, tm, cpm, llmod, path,
-                                            lib::llvm::ObjectFile);
+                                            llvm::ObjectFile);
                         });
                     }
                     None => {}
@@ -351,7 +366,7 @@ pub mod write {
                                         .with_extension("metadata.o");
                         write_output_file(sess, tm, cpm,
                                         trans.metadata_module, &out,
-                                        lib::llvm::ObjectFile);
+                                        llvm::ObjectFile);
                     })
                 }
             });
@@ -381,8 +396,7 @@ pub mod write {
                     sess.note(format!("{}", &cmd).as_slice());
                     let mut note = prog.error.clone();
                     note.push_all(prog.output.as_slice());
-                    sess.note(str::from_utf8(note.as_slice()).unwrap()
-                                                             .as_slice());
+                    sess.note(str::from_utf8(note.as_slice()).unwrap());
                     sess.abort_if_errors();
                 }
             },
@@ -412,7 +426,7 @@ pub mod write {
         {
             let add = |arg: &str| {
                 let s = arg.to_c_str();
-                llvm_args.push(s.with_ref(|p| p));
+                llvm_args.push(s.as_ptr());
                 llvm_c_strs.push(s);
             };
             add("rustc"); // fake program name
@@ -456,29 +470,29 @@ pub mod write {
         });
     }
 
-    unsafe fn populate_llvm_passes(fpm: lib::llvm::PassManagerRef,
-                                   mpm: lib::llvm::PassManagerRef,
+    unsafe fn populate_llvm_passes(fpm: llvm::PassManagerRef,
+                                   mpm: llvm::PassManagerRef,
                                    llmod: ModuleRef,
-                                   opt: lib::llvm::CodeGenOptLevel,
+                                   opt: llvm::CodeGenOptLevel,
                                    no_builtins: bool) {
         // Create the PassManagerBuilder for LLVM. We configure it with
         // reasonable defaults and prepare it to actually populate the pass
         // manager.
         let builder = llvm::LLVMPassManagerBuilderCreate();
         match opt {
-            lib::llvm::CodeGenLevelNone => {
+            llvm::CodeGenLevelNone => {
                 // Don't add lifetime intrinsics at O0
                 llvm::LLVMRustAddAlwaysInlinePass(builder, false);
             }
-            lib::llvm::CodeGenLevelLess => {
+            llvm::CodeGenLevelLess => {
                 llvm::LLVMRustAddAlwaysInlinePass(builder, true);
             }
             // numeric values copied from clang
-            lib::llvm::CodeGenLevelDefault => {
+            llvm::CodeGenLevelDefault => {
                 llvm::LLVMPassManagerBuilderUseInlinerWithThreshold(builder,
                                                                     225);
             }
-            lib::llvm::CodeGenLevelAggressive => {
+            llvm::CodeGenLevelAggressive => {
                 llvm::LLVMPassManagerBuilderUseInlinerWithThreshold(builder,
                                                                     275);
             }
@@ -546,32 +560,85 @@ pub mod write {
  *    system linkers understand.
  */
 
-// FIXME (#9639): This needs to handle non-utf8 `out_filestem` values
-pub fn find_crate_id(attrs: &[ast::Attribute], out_filestem: &str) -> CrateId {
-    match attr::find_crateid(attrs) {
-        None => from_str(out_filestem).unwrap_or_else(|| {
-            let mut s = out_filestem.chars().filter(|c| c.is_XID_continue());
-            from_str(s.collect::<String>().as_slice())
-                .or(from_str("rust-out")).unwrap()
-        }),
-        Some(s) => s,
+pub fn find_crate_name(sess: Option<&Session>,
+                       attrs: &[ast::Attribute],
+                       input: &Input) -> String {
+    use syntax::crateid::CrateId;
+
+    let validate = |s: String, span: Option<Span>| {
+        creader::validate_crate_name(sess, s.as_slice(), span);
+        s
+    };
+
+    // Look in attributes 100% of the time to make sure the attribute is marked
+    // as used. After doing this, however, we still prioritize a crate name from
+    // the command line over one found in the #[crate_name] attribute. If we
+    // find both we ensure that they're the same later on as well.
+    let attr_crate_name = attrs.iter().find(|at| at.check_name("crate_name"))
+                               .and_then(|at| at.value_str().map(|s| (at, s)));
+
+    match sess {
+        Some(sess) => {
+            match sess.opts.crate_name {
+                Some(ref s) => {
+                    match attr_crate_name {
+                        Some((attr, ref name)) if s.as_slice() != name.get() => {
+                            let msg = format!("--crate-name and #[crate_name] \
+                                               are required to match, but `{}` \
+                                               != `{}`", s, name);
+                            sess.span_err(attr.span, msg.as_slice());
+                        }
+                        _ => {},
+                    }
+                    return validate(s.clone(), None);
+                }
+                None => {}
+            }
+        }
+        None => {}
     }
+
+    match attr_crate_name {
+        Some((attr, s)) => return validate(s.get().to_string(), Some(attr.span)),
+        None => {}
+    }
+    let crate_id = attrs.iter().find(|at| at.check_name("crate_id"))
+                        .and_then(|at| at.value_str().map(|s| (at, s)))
+                        .and_then(|(at, s)| {
+                            from_str::<CrateId>(s.get()).map(|id| (at, id))
+                        });
+    match crate_id {
+        Some((attr, id)) => {
+            match sess {
+                Some(sess) => {
+                    sess.span_warn(attr.span, "the #[crate_id] attribute is \
+                                               deprecated for the \
+                                               #[crate_name] attribute");
+                }
+                None => {}
+            }
+            return validate(id.name, Some(attr.span))
+        }
+        None => {}
+    }
+    match *input {
+        FileInput(ref path) => {
+            match path.filestem_str() {
+                Some(s) => return validate(s.to_string(), None),
+                None => {}
+            }
+        }
+        _ => {}
+    }
+
+    "rust-out".to_string()
 }
 
-pub fn crate_id_hash(crate_id: &CrateId) -> String {
-    // This calculates CMH as defined above. Note that we don't use the path of
-    // the crate id in the hash because lookups are only done by (name/vers),
-    // not by path.
-    let mut s = Sha256::new();
-    s.input_str(crate_id.short_name_with_version().as_slice());
-    truncated_hash_result(&mut s).as_slice().slice_to(8).to_string()
-}
-
-// FIXME (#9639): This needs to handle non-utf8 `out_filestem` values
-pub fn build_link_meta(krate: &ast::Crate, out_filestem: &str) -> LinkMeta {
+pub fn build_link_meta(sess: &Session, krate: &ast::Crate,
+                       name: String) -> LinkMeta {
     let r = LinkMeta {
-        crateid: find_crate_id(krate.attrs.as_slice(), out_filestem),
-        crate_hash: Svh::calculate(krate),
+        crate_name: name,
+        crate_hash: Svh::calculate(&sess.opts.cg.metadata, krate),
     };
     info!("{}", r);
     return r;
@@ -594,9 +661,12 @@ fn symbol_hash(tcx: &ty::ctxt,
     // to be independent of one another in the crate.
 
     symbol_hasher.reset();
-    symbol_hasher.input_str(link_meta.crateid.name.as_slice());
+    symbol_hasher.input_str(link_meta.crate_name.as_slice());
     symbol_hasher.input_str("-");
     symbol_hasher.input_str(link_meta.crate_hash.as_str());
+    for meta in tcx.sess.crate_metadata.borrow().iter() {
+        symbol_hasher.input_str(meta.as_slice());
+    }
     symbol_hasher.input_str("-");
     symbol_hasher.input_str(encoder::encoded_ty(tcx, t).as_slice());
     // Prefix with 'h' so that it never blends into adjacent digits
@@ -657,8 +727,8 @@ pub fn sanitize(s: &str) -> String {
 
     // Underscore-qualify anything that didn't start as an ident.
     if result.len() > 0u &&
-        result.as_slice()[0] != '_' as u8 &&
-        ! char::is_XID_start(result.as_slice()[0] as char) {
+        result.as_bytes()[0] != '_' as u8 &&
+        ! char::is_XID_start(result.as_bytes()[0] as char) {
         return format!("_{}", result.as_slice());
     }
 
@@ -666,8 +736,7 @@ pub fn sanitize(s: &str) -> String {
 }
 
 pub fn mangle<PI: Iterator<PathElem>>(mut path: PI,
-                                      hash: Option<&str>,
-                                      vers: Option<&str>) -> String {
+                                      hash: Option<&str>) -> String {
     // Follow C++ namespace-mangling style, see
     // http://en.wikipedia.org/wiki/Name_mangling for more info.
     //
@@ -698,25 +767,13 @@ pub fn mangle<PI: Iterator<PathElem>>(mut path: PI,
         Some(s) => push(&mut n, s),
         None => {}
     }
-    match vers {
-        Some(s) => push(&mut n, s),
-        None => {}
-    }
 
     n.push_char('E'); // End name-sequence.
     n
 }
 
-pub fn exported_name(path: PathElems, hash: &str, vers: &str) -> String {
-    // The version will get mangled to have a leading '_', but it makes more
-    // sense to lead with a 'v' b/c this is a version...
-    let vers = if vers.len() > 0 && !char::is_XID_start(vers.char_at(0)) {
-        format!("v{}", vers)
-    } else {
-        vers.to_string()
-    };
-
-    mangle(path, Some(hash), Some(vers.as_slice()))
+pub fn exported_name(path: PathElems, hash: &str) -> String {
+    mangle(path, Some(hash))
 }
 
 pub fn mangle_exported_name(ccx: &CrateContext, path: PathElems,
@@ -737,31 +794,25 @@ pub fn mangle_exported_name(ccx: &CrateContext, path: PathElems,
     let extra2 = id % EXTRA_CHARS.len();
     let id = id / EXTRA_CHARS.len();
     let extra3 = id % EXTRA_CHARS.len();
-    hash.push_char(EXTRA_CHARS[extra1] as char);
-    hash.push_char(EXTRA_CHARS[extra2] as char);
-    hash.push_char(EXTRA_CHARS[extra3] as char);
+    hash.push_char(EXTRA_CHARS.as_bytes()[extra1] as char);
+    hash.push_char(EXTRA_CHARS.as_bytes()[extra2] as char);
+    hash.push_char(EXTRA_CHARS.as_bytes()[extra3] as char);
 
-    exported_name(path,
-                  hash.as_slice(),
-                  ccx.link_meta.crateid.version_or_default())
+    exported_name(path, hash.as_slice())
 }
 
 pub fn mangle_internal_name_by_type_and_seq(ccx: &CrateContext,
                                             t: ty::t,
                                             name: &str) -> String {
-    let s = ppaux::ty_to_str(ccx.tcx(), t);
+    let s = ppaux::ty_to_string(ccx.tcx(), t);
     let path = [PathName(token::intern(s.as_slice())),
                 gensym_name(name)];
     let hash = get_symbol_hash(ccx, t);
-    mangle(ast_map::Values(path.iter()), Some(hash.as_slice()), None)
+    mangle(ast_map::Values(path.iter()), Some(hash.as_slice()))
 }
 
 pub fn mangle_internal_name_by_path_and_seq(path: PathElems, flav: &str) -> String {
-    mangle(path.chain(Some(gensym_name(flav)).move_iter()), None, None)
-}
-
-pub fn output_lib_filename(id: &CrateId) -> String {
-    format!("{}-{}-{}", id.name, crate_id_hash(id), id.version_or_default())
+    mangle(path.chain(Some(gensym_name(flav)).move_iter()), None)
 }
 
 pub fn get_cc_prog(sess: &Session) -> String {
@@ -803,14 +854,15 @@ fn remove(sess: &Session, path: &Path) {
 pub fn link_binary(sess: &Session,
                    trans: &CrateTranslation,
                    outputs: &OutputFilenames,
-                   id: &CrateId) -> Vec<Path> {
+                   crate_name: &str) -> Vec<Path> {
     let mut out_filenames = Vec::new();
     for &crate_type in sess.crate_types.borrow().iter() {
         if invalid_output_for_target(sess, crate_type) {
             sess.bug(format!("invalid output type `{}` for target os `{}`",
                              crate_type, sess.targ_cfg.os).as_slice());
         }
-        let out_file = link_binary_output(sess, trans, crate_type, outputs, id);
+        let out_file = link_binary_output(sess, trans, crate_type, outputs,
+                                          crate_name);
         out_filenames.push(out_file);
     }
 
@@ -859,9 +911,11 @@ fn is_writeable(p: &Path) -> bool {
     }
 }
 
-pub fn filename_for_input(sess: &Session, crate_type: config::CrateType,
-                          id: &CrateId, out_filename: &Path) -> Path {
-    let libname = output_lib_filename(id);
+pub fn filename_for_input(sess: &Session,
+                          crate_type: config::CrateType,
+                          name: &str,
+                          out_filename: &Path) -> Path {
+    let libname = format!("{}{}", name, sess.opts.cg.extra_filename);
     match crate_type {
         config::CrateTypeRlib => {
             out_filename.with_filename(format!("lib{}.rlib", libname))
@@ -891,13 +945,13 @@ fn link_binary_output(sess: &Session,
                       trans: &CrateTranslation,
                       crate_type: config::CrateType,
                       outputs: &OutputFilenames,
-                      id: &CrateId) -> Path {
+                      crate_name: &str) -> Path {
     let obj_filename = outputs.temp_path(OutputTypeObject);
     let out_filename = match outputs.single_output_file {
         Some(ref file) => file.clone(),
         None => {
             let out_filename = outputs.path(OutputTypeExe);
-            filename_for_input(sess, crate_type, id, &out_filename)
+            filename_for_input(sess, crate_type, crate_name, &out_filename)
         }
     };
 
@@ -936,6 +990,17 @@ fn link_binary_output(sess: &Session,
     out_filename
 }
 
+fn archive_search_paths(sess: &Session) -> Vec<Path> {
+    let mut rustpath = filesearch::rust_path();
+    rustpath.push(sess.target_filesearch().get_lib_path());
+    // FIXME: Addl lib search paths are an unordered HashSet?
+    // Shouldn't this search be done in some order?
+    let addl_lib_paths: HashSet<Path> = sess.opts.addl_lib_search_paths.borrow().clone();
+    let mut search: Vec<Path> = addl_lib_paths.move_iter().collect();
+    search.push_all(rustpath.as_slice());
+    return search;
+}
+
 // Create an 'rlib'
 //
 // An rlib in its current incarnation is essentially a renamed .a file. The
@@ -946,7 +1011,15 @@ fn link_rlib<'a>(sess: &'a Session,
                  trans: Option<&CrateTranslation>, // None == no metadata/bytecode
                  obj_filename: &Path,
                  out_filename: &Path) -> Archive<'a> {
-    let mut a = Archive::create(sess, out_filename, obj_filename);
+    let handler = &sess.diagnostic().handler;
+    let config = ArchiveConfig {
+        handler: handler,
+        dst: out_filename.clone(),
+        lib_search_paths: archive_search_paths(sess),
+        os: sess.targ_cfg.os,
+        maybe_ar_prog: sess.opts.cg.ar.clone()
+    };
+    let mut a = Archive::create(config, obj_filename);
 
     for &(ref l, kind) in sess.cstore.get_used_libraries().borrow().iter() {
         match kind {
@@ -1131,8 +1204,7 @@ fn link_natively(sess: &Session, trans: &CrateTranslation, dylib: bool,
                 sess.note(format!("{}", &cmd).as_slice());
                 let mut output = prog.error.clone();
                 output.push_all(prog.output.as_slice());
-                sess.note(str::from_utf8(output.as_slice()).unwrap()
-                                                           .as_slice());
+                sess.note(str::from_utf8(output.as_slice()).unwrap());
                 sess.abort_if_errors();
             }
         },
@@ -1194,7 +1266,7 @@ fn link_args(cmd: &mut Command,
         abi::OsMacos | abi::OsiOS => {
             let morestack = lib_path.join("libmorestack.a");
 
-            let mut v = "-Wl,-force_load,".as_bytes().to_owned();
+            let mut v = b"-Wl,-force_load,".to_vec();
             v.push_all(morestack.as_vec());
             cmd.arg(v.as_slice());
         }
@@ -1340,7 +1412,7 @@ fn link_args(cmd: &mut Command,
         if sess.targ_cfg.os == abi::OsMacos {
             cmd.args(["-dynamiclib", "-Wl,-dylib"]);
 
-            if !sess.opts.cg.no_rpath {
+            if sess.opts.cg.rpath {
                 let mut v = Vec::from_slice("-Wl,-install_name,@rpath/".as_bytes());
                 v.push_all(out_filename.filename().unwrap());
                 cmd.arg(v.as_slice());
@@ -1359,8 +1431,25 @@ fn link_args(cmd: &mut Command,
     // FIXME (#2397): At some point we want to rpath our guesses as to
     // where extern libraries might live, based on the
     // addl_lib_search_paths
-    if !sess.opts.cg.no_rpath {
-        cmd.args(rpath::get_rpath_flags(sess, out_filename).as_slice());
+    if sess.opts.cg.rpath {
+        let sysroot = sess.sysroot();
+        let target_triple = sess.opts.target_triple.as_slice();
+        let get_install_prefix_lib_path = || {
+            let install_prefix = option_env!("CFG_PREFIX").expect("CFG_PREFIX");
+            let tlib = filesearch::relative_target_lib_path(sysroot, target_triple);
+            let mut path = Path::new(install_prefix);
+            path.push(&tlib);
+
+            path
+        };
+        let rpath_config = RPathConfig {
+            os: sess.targ_cfg.os,
+            used_crates: sess.cstore.get_used_crates(cstore::RequireDynamic),
+            out_filename: out_filename.clone(),
+            get_install_prefix_lib_path: get_install_prefix_lib_path,
+            realpath: ::util::fs::realpath
+        };
+        cmd.args(rpath::get_rpath_flags(rpath_config).as_slice());
     }
 
     // compiler-rt contains implementations of low-level LLVM helpers. This is
@@ -1470,7 +1559,7 @@ fn add_upstream_rust_crates(cmd: &mut Command, sess: &Session,
                 add_dynamic_crate(cmd, sess, src.dylib.unwrap())
             }
             cstore::RequireStatic => {
-                add_static_crate(cmd, sess, tmpdir, cnum, src.rlib.unwrap())
+                add_static_crate(cmd, sess, tmpdir, src.rlib.unwrap())
             }
         }
 
@@ -1487,7 +1576,7 @@ fn add_upstream_rust_crates(cmd: &mut Command, sess: &Session,
 
     // Adds the static "rlib" versions of all crates to the command line.
     fn add_static_crate(cmd: &mut Command, sess: &Session, tmpdir: &Path,
-                        cnum: ast::CrateNum, cratepath: Path) {
+                        cratepath: Path) {
         // When performing LTO on an executable output, all of the
         // bytecode from the upstream libraries has already been
         // included in our object file output. We need to modify all of
@@ -1503,7 +1592,8 @@ fn add_upstream_rust_crates(cmd: &mut Command, sess: &Session,
         // If we're not doing LTO, then our job is simply to just link
         // against the archive.
         if sess.lto() {
-            let name = sess.cstore.get_crate_data(cnum).name.clone();
+            let name = cratepath.filename_str().unwrap();
+            let name = name.slice(3, name.len() - 5); // chop off lib/.rlib
             time(sess.time_passes(),
                  format!("altering {}.rlib", name).as_slice(),
                  (), |()| {
@@ -1518,7 +1608,15 @@ fn add_upstream_rust_crates(cmd: &mut Command, sess: &Session,
                         sess.abort_if_errors();
                     }
                 }
-                let mut archive = Archive::open(sess, dst.clone());
+                let handler = &sess.diagnostic().handler;
+                let config = ArchiveConfig {
+                    handler: handler,
+                    dst: dst.clone(),
+                    lib_search_paths: archive_search_paths(sess),
+                    os: sess.targ_cfg.os,
+                    maybe_ar_prog: sess.opts.cg.ar.clone()
+                };
+                let mut archive = Archive::open(config);
                 archive.remove_file(format!("{}.o", name).as_slice());
                 let files = archive.files();
                 if files.iter().any(|s| s.as_slice().ends_with(".o")) {

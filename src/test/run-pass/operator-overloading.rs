@@ -43,8 +43,12 @@ impl ops::Not<Point> for Point {
 }
 
 impl ops::Index<bool,int> for Point {
-    fn index(&self, x: &bool) -> int {
-        if *x { self.x } else { self.y }
+    fn index(&self, x: &bool) -> &int {
+        if *x {
+            &self.x
+        } else {
+            &self.y
+        }
     }
 }
 

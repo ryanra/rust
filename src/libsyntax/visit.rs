@@ -8,6 +8,22 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Context-passing AST walker. Each overridden visit method has full control
+//! over what happens with its node, it can do its own traversal of the node's
+//! children (potentially passing in different contexts to each), call
+//! `visit::visit_*` to apply the default traversal algorithm (again, it can
+//! override the context), or prevent deeper traversal by doing nothing.
+//!
+//! Note: it is an important invariant that the default visitor walks the body
+//! of a function in "execution order" (more concretely, reverse post-order
+//! with respect to the CFG implied by the AST), meaning that if AST node A may
+//! execute before AST node B, then A is visited first.  The borrow checker in
+//! particular relies on this property.
+//!
+//! Note: walking an AST before macro expansion is probably a bad idea. For
+//! instance, a walker looking for item names in a module will miss all of
+//! those that are created by the expansion of a macro.
+
 use abi::Abi;
 use ast::*;
 use ast;
@@ -17,27 +33,15 @@ use owned_slice::OwnedSlice;
 
 use std::gc::Gc;
 
-// Context-passing AST walker. Each overridden visit method has full control
-// over what happens with its node, it can do its own traversal of the node's
-// children (potentially passing in different contexts to each), call
-// visit::visit_* to apply the default traversal algorithm (again, it can
-// override the context), or prevent deeper traversal by doing nothing.
-//
-// Note: it is an important invariant that the default visitor walks the body
-// of a function in "execution order" (more concretely, reverse post-order
-// with respect to the CFG implied by the AST), meaning that if AST node A may
-// execute before AST node B, then A is visited first.  The borrow checker in
-// particular relies on this property.
-
 pub enum FnKind<'a> {
-    // fn foo() or extern "Abi" fn foo()
+    /// fn foo() or extern "Abi" fn foo()
     FkItemFn(Ident, &'a Generics, FnStyle, Abi),
 
-    // fn foo(&self)
+    /// fn foo(&self)
     FkMethod(Ident, &'a Generics, &'a Method),
 
-    // |x, y| ...
-    // proc(x, y) ...
+    /// |x, y| ...
+    /// proc(x, y) ...
     FkFnBlock,
 }
 
@@ -124,8 +128,13 @@ pub trait Visitor<E: Clone> {
     fn visit_explicit_self(&mut self, es: &ExplicitSelf, e: E) {
         walk_explicit_self(self, es, e)
     }
-    fn visit_mac(&mut self, macro: &Mac, e: E) {
-        walk_mac(self, macro, e)
+    fn visit_mac(&mut self, _macro: &Mac, _e: E) {
+        fail!("visit_mac disabled by default");
+        // NB: see note about macros above.
+        // if you really want a visitor that
+        // works on macros, use this
+        // definition in your trait impl:
+        // visit::walk_mac(self, _macro, _e)
     }
     fn visit_path(&mut self, path: &Path, _id: ast::NodeId, e: E) {
         walk_path(self, path, e)
@@ -177,7 +186,12 @@ pub fn walk_view_item<E: Clone, V: Visitor<E>>(visitor: &mut V, vi: &ViewItem, e
                 }
                 ViewPathList(ref path, ref list, _) => {
                     for id in list.iter() {
-                        visitor.visit_ident(id.span, id.node.name, env.clone())
+                        match id.node {
+                            PathListIdent { name, .. } => {
+                                visitor.visit_ident(id.span, name, env.clone());
+                            }
+                            PathListMod { .. } => ()
+                        }
                     }
                     walk_path(visitor, path, env.clone());
                 }
@@ -202,10 +216,11 @@ pub fn walk_explicit_self<E: Clone, V: Visitor<E>>(visitor: &mut V,
                                                    explicit_self: &ExplicitSelf,
                                                    env: E) {
     match explicit_self.node {
-        SelfStatic | SelfValue | SelfUniq => {}
-        SelfRegion(ref lifetime, _) => {
+        SelfStatic | SelfValue(_) | SelfUniq(_) => {},
+        SelfRegion(ref lifetime, _, _) => {
             visitor.visit_opt_lifetime_ref(explicit_self.span, lifetime, env)
         }
+        SelfExplicit(ref typ, _) => visitor.visit_ty(&**typ, env.clone()),
     }
 }
 
@@ -454,8 +469,8 @@ pub fn walk_pat<E: Clone, V: Visitor<E>>(visitor: &mut V, pattern: &Pat, env: E)
         PatRegion(ref subpattern) => {
             visitor.visit_pat(&**subpattern, env)
         }
-        PatIdent(_, ref path, ref optional_subpattern) => {
-            visitor.visit_path(path, pattern.id, env.clone());
+        PatIdent(_, ref pth1, ref optional_subpattern) => {
+            visitor.visit_ident(pth1.span, pth1.node, env.clone());
             match *optional_subpattern {
                 None => {}
                 Some(ref subpattern) => visitor.visit_pat(&**subpattern, env),
@@ -551,15 +566,21 @@ pub fn walk_fn_decl<E: Clone, V: Visitor<E>>(visitor: &mut V,
 pub fn walk_method_helper<E: Clone, V: Visitor<E>>(visitor: &mut V,
                                                    method: &Method,
                                                    env: E) {
-    visitor.visit_ident(method.span, method.ident, env.clone());
-    visitor.visit_fn(&FkMethod(method.ident, &method.generics, method),
-                     &*method.decl,
-                     &*method.body,
-                     method.span,
-                     method.id,
-                     env.clone());
-    for attr in method.attrs.iter() {
-        visitor.visit_attribute(attr, env.clone());
+    match method.node {
+        MethDecl(ident, ref generics, _, _, _, decl, body, _) => {
+            visitor.visit_ident(method.span, ident, env.clone());
+            visitor.visit_fn(&FkMethod(ident, generics, method),
+                             &*decl,
+                             &*body,
+                             method.span,
+                             method.id,
+                             env.clone());
+            for attr in method.attrs.iter() {
+                visitor.visit_attribute(attr, env.clone());
+            }
+
+        },
+        MethMac(ref mac) => visitor.visit_mac(mac, env.clone())
     }
 }
 
@@ -577,8 +598,12 @@ pub fn walk_fn<E: Clone, V: Visitor<E>>(visitor: &mut V,
         }
         FkMethod(_, generics, method) => {
             visitor.visit_generics(generics, env.clone());
-
-            visitor.visit_explicit_self(&method.explicit_self, env.clone());
+            match method.node {
+                MethDecl(_, _, _, ref explicit_self, _, _, _, _) =>
+                    visitor.visit_explicit_self(explicit_self, env.clone()),
+                MethMac(ref mac) =>
+                    visitor.visit_mac(mac, env.clone())
+            }
         }
         FkFnBlock(..) => {}
     }
@@ -763,6 +788,14 @@ pub fn walk_expr<E: Clone, V: Visitor<E>>(visitor: &mut V, expression: &Expr, en
             }
         }
         ExprFnBlock(ref function_declaration, ref body) => {
+            visitor.visit_fn(&FkFnBlock,
+                             &**function_declaration,
+                             &**body,
+                             expression.span,
+                             expression.id,
+                             env.clone())
+        }
+        ExprUnboxedFn(ref function_declaration, ref body) => {
             visitor.visit_fn(&FkFnBlock,
                              &**function_declaration,
                              &**body,

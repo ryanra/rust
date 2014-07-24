@@ -8,7 +8,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use alloc::owned::Box;
+#![experimental]
+
+use alloc::boxed::Box;
 use any::{Any, AnyRefExt};
 use fmt;
 use io::{Writer, IoResult};

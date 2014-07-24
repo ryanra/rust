@@ -13,9 +13,9 @@ extern crate collections;
 use std::collections::Bitv;
 
 fn bitv_test() {
-    let mut v1 = box Bitv::new(31, false);
-    let v2 = box Bitv::new(31, true);
-    v1.union(v2);
+    let mut v1 = box Bitv::with_capacity(31, false);
+    let v2 = box Bitv::with_capacity(31, true);
+    v1.union(&*v2);
 }
 
 pub fn main() {

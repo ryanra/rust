@@ -18,14 +18,14 @@ Simple [DEFLATE][def]-based compression. This is a wrapper around the
 
 */
 
-#![crate_id = "flate#0.11.0"]
+#![crate_name = "flate"]
 #![experimental]
 #![crate_type = "rlib"]
 #![crate_type = "dylib"]
 #![license = "MIT/ASL2"]
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
        html_favicon_url = "http://www.rust-lang.org/favicon.ico",
-       html_root_url = "http://doc.rust-lang.org/0.11.0/")]
+       html_root_url = "http://doc.rust-lang.org/master/")]
 #![feature(phase)]
 
 #[cfg(test)] #[phase(plugin, link)] extern crate log;
@@ -38,18 +38,18 @@ use libc::{c_void, size_t, c_int};
 #[link(name = "miniz", kind = "static")]
 extern {
     /// Raw miniz compression function.
-    fn tdefl_compress_mem_to_heap(psrc_buf: *c_void,
-                                      src_buf_len: size_t,
-                                      pout_len: *mut size_t,
-                                      flags: c_int)
-                                      -> *mut c_void;
+    fn tdefl_compress_mem_to_heap(psrc_buf: *const c_void,
+                                  src_buf_len: size_t,
+                                  pout_len: *mut size_t,
+                                  flags: c_int)
+                                  -> *mut c_void;
 
     /// Raw miniz decompression function.
-    fn tinfl_decompress_mem_to_heap(psrc_buf: *c_void,
-                                        src_buf_len: size_t,
-                                        pout_len: *mut size_t,
-                                        flags: c_int)
-                                        -> *mut c_void;
+    fn tinfl_decompress_mem_to_heap(psrc_buf: *const c_void,
+                                    src_buf_len: size_t,
+                                    pout_len: *mut size_t,
+                                    flags: c_int)
+                                    -> *mut c_void;
 }
 
 static LZ_NORM : c_int = 0x80;  // LZ with 128 probes, "normal"
@@ -59,10 +59,10 @@ static TDEFL_WRITE_ZLIB_HEADER : c_int = 0x01000; // write zlib header and adler
 fn deflate_bytes_internal(bytes: &[u8], flags: c_int) -> Option<CVec<u8>> {
     unsafe {
         let mut outsz : size_t = 0;
-        let res = tdefl_compress_mem_to_heap(bytes.as_ptr() as *c_void,
-                                                     bytes.len() as size_t,
-                                                     &mut outsz,
-                                                     flags);
+        let res = tdefl_compress_mem_to_heap(bytes.as_ptr() as *const _,
+                                             bytes.len() as size_t,
+                                             &mut outsz,
+                                             flags);
         if !res.is_null() {
             Some(CVec::new_with_dtor(res as *mut u8, outsz as uint, proc() libc::free(res)))
         } else {
@@ -84,10 +84,10 @@ pub fn deflate_bytes_zlib(bytes: &[u8]) -> Option<CVec<u8>> {
 fn inflate_bytes_internal(bytes: &[u8], flags: c_int) -> Option<CVec<u8>> {
     unsafe {
         let mut outsz : size_t = 0;
-        let res = tinfl_decompress_mem_to_heap(bytes.as_ptr() as *c_void,
-                                                       bytes.len() as size_t,
-                                                       &mut outsz,
-                                                       flags);
+        let res = tinfl_decompress_mem_to_heap(bytes.as_ptr() as *const _,
+                                               bytes.len() as size_t,
+                                               &mut outsz,
+                                               flags);
         if !res.is_null() {
             Some(CVec::new_with_dtor(res as *mut u8, outsz as uint, proc() libc::free(res)))
         } else {

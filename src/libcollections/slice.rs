@@ -17,7 +17,7 @@ Vectors are Rust's list type. Vectors contain zero or more values of
 homogeneous types:
 
 ```rust
-let int_vector = [1,2,3];
+let int_vector = [1i, 2i, 3i];
 let str_vector = ["one", "two", "three"];
 ```
 
@@ -41,9 +41,9 @@ An example is the method `.slice(a, b)` that returns an immutable "view" into
 a vector or a vector slice from the index interval `[a, b)`:
 
 ```rust
-let numbers = [0, 1, 2];
+let numbers = [0i, 1i, 2i];
 let last_numbers = numbers.slice(1, 3);
-// last_numbers is now &[1, 2]
+// last_numbers is now &[1i, 2i]
 ```
 
 Traits defined for the `~[T]` type, like `OwnedVector`, can only be called
@@ -54,9 +54,9 @@ An example is the method `.push(element)` that will add an element at the end
 of the vector:
 
 ```rust
-let mut numbers = vec![0, 1, 2];
+let mut numbers = vec![0i, 1i, 2i];
 numbers.push(7);
-// numbers is now vec![0, 1, 2, 7];
+// numbers is now vec![0i, 1i, 2i, 7i];
 ```
 
 ## Implementations of other traits
@@ -277,21 +277,33 @@ impl<T: Clone> Iterator<Vec<T>> for Permutations<T> {
 
 /// Extension methods for vector slices with cloneable elements
 pub trait CloneableVector<T> {
-    /// Copy `self` into a new owned vector
-    fn to_owned(&self) -> Vec<T>;
+    /// Copy `self` into a new vector
+    fn to_vec(&self) -> Vec<T>;
+
+    /// Deprecated. Use `to_vec`
+    #[deprecated = "Replaced by `to_vec`"]
+    fn to_owned(&self) -> Vec<T> {
+        self.to_vec()
+    }
 
     /// Convert `self` into an owned vector, not making a copy if possible.
-    fn into_owned(self) -> Vec<T>;
+    fn into_vec(self) -> Vec<T>;
+
+    /// Deprecated. Use `into_vec`
+    #[deprecated = "Replaced by `into_vec`"]
+    fn into_owned(self) -> Vec<T> {
+        self.into_vec()
+    }
 }
 
 /// Extension methods for vector slices
 impl<'a, T: Clone> CloneableVector<T> for &'a [T] {
     /// Returns a copy of `v`.
     #[inline]
-    fn to_owned(&self) -> Vec<T> { Vec::from_slice(*self) }
+    fn to_vec(&self) -> Vec<T> { Vec::from_slice(*self) }
 
     #[inline(always)]
-    fn into_owned(self) -> Vec<T> { self.to_owned() }
+    fn into_vec(self) -> Vec<T> { self.to_vec() }
 }
 
 /// Extension methods for vectors containing `Clone` elements.
@@ -325,7 +337,7 @@ impl<'a,T:Clone> ImmutableCloneableVector<T> for &'a [T] {
     fn permutations(self) -> Permutations<T> {
         Permutations{
             swaps: ElementSwaps::new(self.len()),
-            v: self.to_owned(),
+            v: self.to_vec(),
         }
     }
 
@@ -341,7 +353,7 @@ fn insertion_sort<T>(v: &mut [T], compare: |&T, &T| -> Ordering) {
         let mut j = i;
         unsafe {
             // `i` is in bounds.
-            let read_ptr = buf_v.offset(i) as *T;
+            let read_ptr = buf_v.offset(i) as *const T;
 
             // find where to insert, we need to do strict <,
             // rather than <=, to maintain stability.
@@ -365,7 +377,7 @@ fn insertion_sort<T>(v: &mut [T], compare: |&T, &T| -> Ordering) {
                                  &*buf_v.offset(j),
                                  (i - j) as uint);
                 ptr::copy_nonoverlapping_memory(buf_v.offset(j),
-                                                &tmp as *T,
+                                                &tmp as *const T,
                                                 1);
                 mem::forget(tmp);
             }
@@ -779,7 +791,7 @@ mod tests {
     fn test_is_empty() {
         let xs: [int, ..0] = [];
         assert!(xs.is_empty());
-        assert!(![0].is_empty());
+        assert!(![0i].is_empty());
     }
 
     #[test]
@@ -888,7 +900,7 @@ mod tests {
     fn test_slice() {
         // Test fixed length vector.
         let vec_fixed = [1i, 2, 3, 4];
-        let v_a = vec_fixed.slice(1u, vec_fixed.len()).to_owned();
+        let v_a = vec_fixed.slice(1u, vec_fixed.len()).to_vec();
         assert_eq!(v_a.len(), 3u);
         let v_a = v_a.as_slice();
         assert_eq!(v_a[0], 2);
@@ -897,7 +909,7 @@ mod tests {
 
         // Test on stack.
         let vec_stack = &[1i, 2, 3];
-        let v_b = vec_stack.slice(1u, 3u).to_owned();
+        let v_b = vec_stack.slice(1u, 3u).to_vec();
         assert_eq!(v_b.len(), 2u);
         let v_b = v_b.as_slice();
         assert_eq!(v_b[0], 2);
@@ -905,7 +917,7 @@ mod tests {
 
         // Test `Box<[T]>`
         let vec_unique = vec![1i, 2, 3, 4, 5, 6];
-        let v_d = vec_unique.slice(1u, 6u).to_owned();
+        let v_d = vec_unique.slice(1u, 6u).to_vec();
         assert_eq!(v_d.len(), 5u);
         let v_d = v_d.as_slice();
         assert_eq!(v_d[0], 2);
@@ -1132,7 +1144,7 @@ mod tests {
             let (min_size, max_opt) = it.size_hint();
             assert_eq!(min_size, 1);
             assert_eq!(max_opt.unwrap(), 1);
-            assert_eq!(it.next(), Some(v.as_slice().to_owned()));
+            assert_eq!(it.next(), Some(v.as_slice().to_vec()));
             assert_eq!(it.next(), None);
         }
         {
@@ -1141,7 +1153,7 @@ mod tests {
             let (min_size, max_opt) = it.size_hint();
             assert_eq!(min_size, 1);
             assert_eq!(max_opt.unwrap(), 1);
-            assert_eq!(it.next(), Some(v.as_slice().to_owned()));
+            assert_eq!(it.next(), Some(v.as_slice().to_vec()));
             assert_eq!(it.next(), None);
         }
         {
@@ -1528,7 +1540,7 @@ mod tests {
     fn test_permute_fail() {
         let v = [(box 0i, Rc::new(0i)), (box 0i, Rc::new(0i)),
                  (box 0i, Rc::new(0i)), (box 0i, Rc::new(0i))];
-        let mut i = 0;
+        let mut i = 0u;
         for _ in v.permutations() {
             if i == 2 {
                 fail!()
@@ -1870,16 +1882,16 @@ mod tests {
     fn test_overflow_does_not_cause_segfault() {
         let mut v = vec![];
         v.reserve_exact(-1);
-        v.push(1);
+        v.push(1i);
         v.push(2);
     }
 
     #[test]
     #[should_fail]
     fn test_overflow_does_not_cause_segfault_managed() {
-        let mut v = vec![Rc::new(1)];
+        let mut v = vec![Rc::new(1i)];
         v.reserve_exact(-1);
-        v.push(Rc::new(2));
+        v.push(Rc::new(2i));
     }
 
     #[test]
@@ -2279,7 +2291,7 @@ mod bench {
                 v.set_len(1024);
             }
             for x in v.mut_iter() {
-                *x = 0;
+                *x = 0i;
             }
             v
         });

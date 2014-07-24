@@ -8,12 +8,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::os;
-use std::str;
 use std::io::process::{ProcessExit, Command, Process, ProcessOutput};
 use std::dynamic_lib::DynamicLibrary;
 
-fn target_env(lib_path: &str, aux_path: Option<&str>) -> Vec<(String, String)> {
+fn add_target_env(cmd: &mut Command, lib_path: &str, aux_path: Option<&str>) {
     // Need to be sure to put both the lib_path and the aux path in the dylib
     // search path for the child.
     let mut path = DynamicLibrary::search_path();
@@ -23,19 +21,11 @@ fn target_env(lib_path: &str, aux_path: Option<&str>) -> Vec<(String, String)> {
     }
     path.insert(0, Path::new(lib_path));
 
-    // Remove the previous dylib search path var
-    let var = DynamicLibrary::envvar();
-    let mut env: Vec<(String,String)> = os::env();
-    match env.iter().position(|&(ref k, _)| k.as_slice() == var) {
-        Some(i) => { env.remove(i); }
-        None => {}
-    }
-
     // Add the new dylib search path var
+    let var = DynamicLibrary::envvar();
     let newpath = DynamicLibrary::create_path(path.as_slice());
-    let newpath = str::from_utf8(newpath.as_slice()).unwrap().to_string();
-    env.push((var.to_string(), newpath));
-    return env;
+    let newpath = String::from_utf8(newpath).unwrap();
+    cmd.env(var.to_string(), newpath);
 }
 
 pub struct Result {pub status: ProcessExit, pub out: String, pub err: String}
@@ -47,8 +37,14 @@ pub fn run(lib_path: &str,
            env: Vec<(String, String)> ,
            input: Option<String>) -> Option<Result> {
 
-    let env = env.clone().append(target_env(lib_path, aux_path).as_slice());
-    match Command::new(prog).args(args).env(env.as_slice()).spawn() {
+    let mut cmd = Command::new(prog);
+    cmd.args(args);
+    add_target_env(&mut cmd, lib_path, aux_path);
+    for (key, val) in env.move_iter() {
+        cmd.env(key, val);
+    }
+
+    match cmd.spawn() {
         Ok(mut process) => {
             for input in input.iter() {
                 process.stdin.get_mut_ref().write(input.as_bytes()).unwrap();
@@ -58,8 +54,8 @@ pub fn run(lib_path: &str,
 
             Some(Result {
                 status: status,
-                out: str::from_utf8(output.as_slice()).unwrap().to_string(),
-                err: str::from_utf8(error.as_slice()).unwrap().to_string()
+                out: String::from_utf8(output).unwrap(),
+                err: String::from_utf8(error).unwrap()
             })
         },
         Err(..) => None
@@ -73,8 +69,14 @@ pub fn run_background(lib_path: &str,
            env: Vec<(String, String)> ,
            input: Option<String>) -> Option<Process> {
 
-    let env = env.clone().append(target_env(lib_path, aux_path).as_slice());
-    match Command::new(prog).args(args).env(env.as_slice()).spawn() {
+    let mut cmd = Command::new(prog);
+    cmd.args(args);
+    add_target_env(&mut cmd, lib_path, aux_path);
+    for (key, val) in env.move_iter() {
+        cmd.env(key, val);
+    }
+
+    match cmd.spawn() {
         Ok(mut process) => {
             for input in input.iter() {
                 process.stdin.get_mut_ref().write(input.as_bytes()).unwrap();

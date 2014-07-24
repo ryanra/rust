@@ -78,8 +78,8 @@ receiver position from being called via an object.)
 #### Trait variance and vtable resolution
 
 But traits aren't only used with objects. They're also used when
-deciding whether a given impl satisfies a given trait bound (or should
-be -- FIXME #5781). To set the scene here, imagine I had a function:
+deciding whether a given impl satisfies a given trait bound. To set the
+scene here, imagine I had a function:
 
     fn convertAll<A,T:ConvertTo<A>>(v: &[T]) {
         ...
@@ -214,6 +214,7 @@ pub fn infer_variance(tcx: &ty::ctxt,
     let terms_cx = determine_parameters_to_be_inferred(tcx, &mut arena, krate);
     let constraints_cx = add_constraints_from_crate(terms_cx, krate);
     solve_constraints(constraints_cx);
+    tcx.variance_computed.set(true);
 }
 
 /**************************************************************************
@@ -547,7 +548,7 @@ impl<'a> ConstraintContext<'a> {
             None => {
                 self.tcx().sess.bug(format!(
                         "no inferred index entry for {}",
-                        self.tcx().map.node_to_str(param_id)).as_slice());
+                        self.tcx().map.node_to_string(param_id)).as_slice());
             }
         }
     }
@@ -588,8 +589,8 @@ impl<'a> ConstraintContext<'a> {
             let is_inferred;
             macro_rules! cannot_happen { () => { {
                 fail!("invalid parent: {:s} for {:s}",
-                      tcx.map.node_to_str(parent_id),
-                      tcx.map.node_to_str(param_id));
+                      tcx.map.node_to_string(parent_id),
+                      tcx.map.node_to_string(param_id));
             } } }
 
             match parent {
@@ -658,7 +659,7 @@ impl<'a> ConstraintContext<'a> {
                       InferredIndex(index): InferredIndex,
                       variance: VarianceTermPtr<'a>) {
         debug!("add_constraint(index={}, variance={})",
-                index, variance.to_str());
+                index, variance.to_string());
         self.constraints.push(Constraint { inferred: InferredIndex(index),
                                            variance: variance });
     }
@@ -714,7 +715,7 @@ impl<'a> ConstraintContext<'a> {
         match ty::get(ty).sty {
             ty::ty_nil | ty::ty_bot | ty::ty_bool |
             ty::ty_char | ty::ty_int(_) | ty::ty_uint(_) |
-            ty::ty_float(_) | ty::ty_str => {
+            ty::ty_float(_) | ty::ty_str | ty::ty_unboxed_closure(..) => {
                 /* leaf type -- noop */
             }
 
@@ -749,15 +750,15 @@ impl<'a> ConstraintContext<'a> {
 
                 // All type parameters on enums and structs should be
                 // in the TypeSpace.
-                assert!(generics.types.get_vec(subst::SelfSpace).is_empty());
-                assert!(generics.types.get_vec(subst::FnSpace).is_empty());
-                assert!(generics.regions.get_vec(subst::SelfSpace).is_empty());
-                assert!(generics.regions.get_vec(subst::FnSpace).is_empty());
+                assert!(generics.types.is_empty_in(subst::SelfSpace));
+                assert!(generics.types.is_empty_in(subst::FnSpace));
+                assert!(generics.regions.is_empty_in(subst::SelfSpace));
+                assert!(generics.regions.is_empty_in(subst::FnSpace));
 
                 self.add_constraints_from_substs(
                     def_id,
-                    generics.types.get_vec(subst::TypeSpace),
-                    generics.regions.get_vec(subst::TypeSpace),
+                    generics.types.get_slice(subst::TypeSpace),
+                    generics.regions.get_slice(subst::TypeSpace),
                     substs,
                     variance);
             }
@@ -768,22 +769,22 @@ impl<'a> ConstraintContext<'a> {
 
                 // Traits DO have a Self type parameter, but it is
                 // erased from object types.
-                assert!(!generics.types.get_vec(subst::SelfSpace).is_empty() &&
-                        substs.types.get_vec(subst::SelfSpace).is_empty());
+                assert!(!generics.types.is_empty_in(subst::SelfSpace) &&
+                        substs.types.is_empty_in(subst::SelfSpace));
 
                 // Traits never declare region parameters in the self
                 // space.
-                assert!(generics.regions.get_vec(subst::SelfSpace).is_empty());
+                assert!(generics.regions.is_empty_in(subst::SelfSpace));
 
                 // Traits never declare type/region parameters in the
                 // fn space.
-                assert!(generics.types.get_vec(subst::FnSpace).is_empty());
-                assert!(generics.regions.get_vec(subst::FnSpace).is_empty());
+                assert!(generics.types.is_empty_in(subst::FnSpace));
+                assert!(generics.regions.is_empty_in(subst::FnSpace));
 
                 self.add_constraints_from_substs(
                     def_id,
-                    generics.types.get_vec(subst::TypeSpace),
-                    generics.regions.get_vec(subst::TypeSpace),
+                    generics.types.get_slice(subst::TypeSpace),
+                    generics.regions.get_slice(subst::TypeSpace),
                     substs,
                     variance);
             }
@@ -832,8 +833,8 @@ impl<'a> ConstraintContext<'a> {
     /// object, etc) appearing in a context with ambient variance `variance`
     fn add_constraints_from_substs(&mut self,
                                    def_id: ast::DefId,
-                                   type_param_defs: &Vec<ty::TypeParameterDef>,
-                                   region_param_defs: &Vec<ty::RegionParameterDef>,
+                                   type_param_defs: &[ty::TypeParameterDef],
+                                   region_param_defs: &[ty::RegionParameterDef],
                                    substs: &subst::Substs,
                                    variance: VarianceTermPtr<'a>) {
         debug!("add_constraints_from_substs(def_id={:?})", def_id);
@@ -975,7 +976,7 @@ impl<'a> SolveContext<'a> {
                                 .param_id,
                             old_value,
                             new_value,
-                            term.to_str());
+                            term.to_string());
 
                     *self.solutions.get_mut(inferred) = new_value;
                     changed = true;

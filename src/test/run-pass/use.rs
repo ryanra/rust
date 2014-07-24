@@ -15,15 +15,13 @@
 #![no_std]
 extern crate std;
 extern crate zed = "std";
-extern crate bar = "std#0.11.0";
 
 
 use std::str;
 use x = zed::str;
 mod baz {
-    pub use bar::str;
     pub use x = std::str;
 }
 
 #[start]
-pub fn start(_: int, _: **u8) -> int { 0 }
+pub fn start(_: int, _: *const *const u8) -> int { 0 }

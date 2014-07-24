@@ -8,17 +8,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![crate_id = "rustrt#0.11.0"]
+#![crate_name = "rustrt"]
 #![license = "MIT/ASL2"]
 #![crate_type = "rlib"]
 #![crate_type = "dylib"]
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
        html_favicon_url = "http://www.rust-lang.org/favicon.ico",
-       html_root_url = "http://doc.rust-lang.org/0.11.0/")]
+       html_root_url = "http://doc.rust-lang.org/master/")]
 
 #![feature(macro_rules, phase, globs, thread_local, managed_boxes, asm)]
-#![feature(linkage, lang_items, unsafe_destructor)]
-#![allow(unknown_features)] // NOTE: remove after stage0 snapshot
+#![feature(linkage, lang_items, unsafe_destructor, default_type_params)]
 #![no_std]
 #![experimental]
 
@@ -38,7 +37,7 @@ extern crate collections;
 
 use core::prelude::*;
 
-use alloc::owned::Box;
+use alloc::boxed::Box;
 use core::any::Any;
 
 #[cfg(not(kernel))] use task::{Task, BlockedTask, TaskOpts};
@@ -107,7 +106,7 @@ pub static DEFAULT_ERROR_CODE: int = 101;
 /// the crate's logging flags, registering GC
 /// metadata, and storing the process arguments.
 #[cfg(not(kernel))]
-pub fn init(argc: int, argv: **u8) {
+pub fn init(argc: int, argv: *const *const u8) {
     // FIXME: Derefing these pointers is not safe.
     // Need to propagate the unsafety to `start`.
     unsafe {

@@ -12,8 +12,9 @@
 
 use libc::c_uint;
 use std::cmp;
-use lib::llvm::{llvm, Integer, Pointer, Float, Double, Struct, Array};
-use lib::llvm::{StructRetAttribute, ZExtAttribute};
+use llvm;
+use llvm::{Integer, Pointer, Float, Double, Struct, Array};
+use llvm::{StructRetAttribute, ZExtAttribute};
 use middle::trans::context::CrateContext;
 use middle::trans::cabi::*;
 use middle::trans::type_::Type;
@@ -85,7 +86,7 @@ fn ty_size(ty: Type) -> uint {
 
 fn classify_ret_ty(ccx: &CrateContext, ty: Type) -> ArgType {
     if is_reg_ty(ty) {
-        let attr = if ty == Type::bool(ccx) { Some(ZExtAttribute) } else { None };
+        let attr = if ty == Type::i1(ccx) { Some(ZExtAttribute) } else { None };
         ArgType::direct(ty, None, None, attr)
     } else {
         ArgType::indirect(ty, Some(StructRetAttribute))
@@ -102,7 +103,7 @@ fn classify_arg_ty(ccx: &CrateContext, ty: Type, offset: &mut uint) -> ArgType {
     *offset += align_up_to(size, align * 8) / 8;
 
     if is_reg_ty(ty) {
-        let attr = if ty == Type::bool(ccx) { Some(ZExtAttribute) } else { None };
+        let attr = if ty == Type::i1(ccx) { Some(ZExtAttribute) } else { None };
         ArgType::direct(ty, None, None, attr)
     } else {
         ArgType::direct(

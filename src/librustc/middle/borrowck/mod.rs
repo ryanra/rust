@@ -28,6 +28,7 @@ use std::gc::{Gc, GC};
 use std::string::String;
 use syntax::ast;
 use syntax::ast_map;
+use syntax::ast_map::blocks::{FnLikeNode, FnParts};
 use syntax::ast_util;
 use syntax::codemap::Span;
 use syntax::parse::token;
@@ -49,6 +50,8 @@ pub mod doc;
 pub mod check_loans;
 
 pub mod gather_loans;
+
+pub mod graphviz;
 
 pub mod move_data;
 
@@ -116,6 +119,13 @@ fn borrowck_item(this: &mut BorrowckCtxt, item: &ast::Item) {
     }
 }
 
+/// Collection of conclusions determined via borrow checker analyses.
+pub struct AnalysisData<'a> {
+    pub all_loans: Vec<Loan>,
+    pub loans: DataFlowContext<'a, LoanDataFlowOperator>,
+    pub move_data: move_data::FlowedMoveData<'a>,
+}
+
 fn borrowck_fn(this: &mut BorrowckCtxt,
                fk: &FnKind,
                decl: &ast::FnDecl,
@@ -123,18 +133,35 @@ fn borrowck_fn(this: &mut BorrowckCtxt,
                sp: Span,
                id: ast::NodeId) {
     debug!("borrowck_fn(id={})", id);
+    let cfg = cfg::CFG::new(this.tcx, body);
+    let AnalysisData { all_loans,
+                       loans: loan_dfcx,
+                       move_data:flowed_moves } =
+        build_borrowck_dataflow_data(this, fk, decl, &cfg, body, sp, id);
 
+    check_loans::check_loans(this, &loan_dfcx, flowed_moves,
+                             all_loans.as_slice(), decl, body);
+
+    visit::walk_fn(this, fk, decl, body, sp, ());
+}
+
+fn build_borrowck_dataflow_data<'a>(this: &mut BorrowckCtxt<'a>,
+                                    fk: &FnKind,
+                                    decl: &ast::FnDecl,
+                                    cfg: &cfg::CFG,
+                                    body: &ast::Block,
+                                    sp: Span,
+                                    id: ast::NodeId) -> AnalysisData<'a> {
     // Check the body of fn items.
     let id_range = ast_util::compute_id_range_for_fn_body(fk, decl, body, sp, id);
     let (all_loans, move_data) =
         gather_loans::gather_loans_in_fn(this, decl, body);
-    let cfg = cfg::CFG::new(this.tcx, body);
 
     let mut loan_dfcx =
         DataFlowContext::new(this.tcx,
                              "borrowck",
                              Some(decl),
-                             &cfg,
+                             cfg,
                              LoanDataFlowOperator,
                              id_range,
                              all_loans.len());
@@ -142,20 +169,62 @@ fn borrowck_fn(this: &mut BorrowckCtxt,
         loan_dfcx.add_gen(loan.gen_scope, loan_idx);
         loan_dfcx.add_kill(loan.kill_scope, loan_idx);
     }
-    loan_dfcx.add_kills_from_flow_exits(&cfg);
-    loan_dfcx.propagate(&cfg, body);
+    loan_dfcx.add_kills_from_flow_exits(cfg);
+    loan_dfcx.propagate(cfg, body);
 
     let flowed_moves = move_data::FlowedMoveData::new(move_data,
                                                       this.tcx,
-                                                      &cfg,
+                                                      cfg,
                                                       id_range,
                                                       decl,
                                                       body);
 
-    check_loans::check_loans(this, &loan_dfcx, flowed_moves,
-                             all_loans.as_slice(), decl, body);
+    AnalysisData { all_loans: all_loans,
+                   loans: loan_dfcx,
+                   move_data:flowed_moves }
+}
 
-    visit::walk_fn(this, fk, decl, body, sp, ());
+/// This and a `ty::ctxt` is all you need to run the dataflow analyses
+/// used in the borrow checker.
+pub struct FnPartsWithCFG<'a> {
+    pub fn_parts: FnParts<'a>,
+    pub cfg:  &'a cfg::CFG,
+}
+
+impl<'a> FnPartsWithCFG<'a> {
+    pub fn from_fn_like(f: &'a FnLikeNode,
+                        g: &'a cfg::CFG) -> FnPartsWithCFG<'a> {
+        FnPartsWithCFG { fn_parts: f.to_fn_parts(), cfg: g }
+    }
+}
+
+/// Accessor for introspective clients inspecting `AnalysisData` and
+/// the `BorrowckCtxt` itself , e.g. the flowgraph visualizer.
+pub fn build_borrowck_dataflow_data_for_fn<'a>(
+    tcx: &'a ty::ctxt,
+    input: FnPartsWithCFG<'a>) -> (BorrowckCtxt<'a>, AnalysisData<'a>) {
+
+    let mut bccx = BorrowckCtxt {
+        tcx: tcx,
+        stats: box(GC) BorrowStats {
+            loaned_paths_same: Cell::new(0),
+            loaned_paths_imm: Cell::new(0),
+            stable_paths: Cell::new(0),
+            guaranteed_paths: Cell::new(0),
+        }
+    };
+
+    let p = input.fn_parts;
+
+    let dataflow_data = build_borrowck_dataflow_data(&mut bccx,
+                                                     &p.kind,
+                                                     &*p.decl,
+                                                     input.cfg,
+                                                     &*p.body,
+                                                     p.span,
+                                                     p.id);
+
+    (bccx, dataflow_data)
 }
 
 // ----------------------------------------------------------------------
@@ -196,6 +265,12 @@ pub struct Loan {
     kill_scope: ast::NodeId,
     span: Span,
     cause: euv::LoanCause,
+}
+
+impl Loan {
+    pub fn loan_path(&self) -> Rc<LoanPath> {
+        self.loan_path.clone()
+    }
 }
 
 #[deriving(PartialEq, Eq, Hash)]
@@ -418,7 +493,7 @@ impl<'a> BorrowckCtxt<'a> {
     pub fn report(&self, err: BckError) {
         self.span_err(
             err.span,
-            self.bckerr_to_str(&err).as_slice());
+            self.bckerr_to_string(&err).as_slice());
         self.note_and_explain_bckerr(err);
     }
 
@@ -439,7 +514,7 @@ impl<'a> BorrowckCtxt<'a> {
                     use_span,
                     format!("{} of possibly uninitialized variable: `{}`",
                             verb,
-                            self.loan_path_to_str(lp)).as_slice());
+                            self.loan_path_to_string(lp)).as_slice());
             }
             _ => {
                 let partially = if lp == moved_lp {""} else {"partially "};
@@ -448,7 +523,7 @@ impl<'a> BorrowckCtxt<'a> {
                     format!("{} of {}moved value: `{}`",
                             verb,
                             partially,
-                            self.loan_path_to_str(lp)).as_slice());
+                            self.loan_path_to_string(lp)).as_slice());
             }
         }
 
@@ -472,7 +547,7 @@ impl<'a> BorrowckCtxt<'a> {
                 self.tcx.sess.span_note(
                     expr_span,
                     format!("`{}` moved here because it has type `{}`, which is {}",
-                            self.loan_path_to_str(moved_lp),
+                            self.loan_path_to_string(moved_lp),
                             expr_ty.user_string(self.tcx),
                             suggestion).as_slice());
             }
@@ -483,7 +558,7 @@ impl<'a> BorrowckCtxt<'a> {
                     format!("`{}` moved here because it has type `{}`, \
                              which is moved by default (use `ref` to \
                              override)",
-                            self.loan_path_to_str(moved_lp),
+                            self.loan_path_to_string(moved_lp),
                             pat_ty.user_string(self.tcx)).as_slice());
             }
 
@@ -506,7 +581,7 @@ impl<'a> BorrowckCtxt<'a> {
                     expr_span,
                     format!("`{}` moved into closure environment here because it \
                             has type `{}`, which is {}",
-                            self.loan_path_to_str(moved_lp),
+                            self.loan_path_to_string(moved_lp),
                             expr_ty.user_string(self.tcx),
                             suggestion).as_slice());
             }
@@ -536,7 +611,7 @@ impl<'a> BorrowckCtxt<'a> {
         self.tcx.sess.span_err(
             span,
             format!("re-assignment of immutable variable `{}`",
-                    self.loan_path_to_str(lp)).as_slice());
+                    self.loan_path_to_string(lp)).as_slice());
         self.tcx.sess.span_note(assign.span, "prior assignment occurs here");
     }
 
@@ -552,20 +627,20 @@ impl<'a> BorrowckCtxt<'a> {
         self.tcx.sess.span_end_note(s, m);
     }
 
-    pub fn bckerr_to_str(&self, err: &BckError) -> String {
+    pub fn bckerr_to_string(&self, err: &BckError) -> String {
         match err.code {
             err_mutbl => {
                 let descr = match opt_loan_path(&err.cmt) {
                     None => {
                         format!("{} {}",
                                 err.cmt.mutbl.to_user_str(),
-                                self.cmt_to_str(&*err.cmt))
+                                self.cmt_to_string(&*err.cmt))
                     }
                     Some(lp) => {
                         format!("{} {} `{}`",
                                 err.cmt.mutbl.to_user_str(),
-                                self.cmt_to_str(&*err.cmt),
-                                self.loan_path_to_str(&*lp))
+                                self.cmt_to_string(&*err.cmt),
+                                self.loan_path_to_string(&*lp))
                     }
                 };
 
@@ -589,7 +664,7 @@ impl<'a> BorrowckCtxt<'a> {
                 let msg = match opt_loan_path(&err.cmt) {
                     None => "borrowed value".to_string(),
                     Some(lp) => {
-                        format!("`{}`", self.loan_path_to_str(&*lp))
+                        format!("`{}`", self.loan_path_to_string(&*lp))
                     }
                 };
                 format!("{} does not live long enough", msg)
@@ -597,9 +672,9 @@ impl<'a> BorrowckCtxt<'a> {
             err_borrowed_pointer_too_short(..) => {
                 let descr = match opt_loan_path(&err.cmt) {
                     Some(lp) => {
-                        format!("`{}`", self.loan_path_to_str(&*lp))
+                        format!("`{}`", self.loan_path_to_string(&*lp))
                     }
-                    None => self.cmt_to_str(&*err.cmt),
+                    None => self.cmt_to_string(&*err.cmt),
                 };
 
                 format!("lifetime of {} is too short to guarantee \
@@ -691,9 +766,9 @@ impl<'a> BorrowckCtxt<'a> {
             err_borrowed_pointer_too_short(loan_scope, ptr_scope) => {
                 let descr = match opt_loan_path(&err.cmt) {
                     Some(lp) => {
-                        format!("`{}`", self.loan_path_to_str(&*lp))
+                        format!("`{}`", self.loan_path_to_string(&*lp))
                     }
-                    None => self.cmt_to_str(&*err.cmt),
+                    None => self.cmt_to_string(&*err.cmt),
                 };
                 note_and_explain_region(
                     self.tcx,
@@ -710,7 +785,7 @@ impl<'a> BorrowckCtxt<'a> {
         }
     }
 
-    pub fn append_loan_path_to_str(&self,
+    pub fn append_loan_path_to_string(&self,
                                    loan_path: &LoanPath,
                                    out: &mut String) {
         match *loan_path {
@@ -720,7 +795,7 @@ impl<'a> BorrowckCtxt<'a> {
             }
 
             LpExtend(ref lp_base, _, LpInterior(mc::InteriorField(fname))) => {
-                self.append_autoderefd_loan_path_to_str(&**lp_base, out);
+                self.append_autoderefd_loan_path_to_string(&**lp_base, out);
                 match fname {
                     mc::NamedField(fname) => {
                         out.push_char('.');
@@ -728,24 +803,24 @@ impl<'a> BorrowckCtxt<'a> {
                     }
                     mc::PositionalField(idx) => {
                         out.push_char('#'); // invent a notation here
-                        out.push_str(idx.to_str().as_slice());
+                        out.push_str(idx.to_string().as_slice());
                     }
                 }
             }
 
             LpExtend(ref lp_base, _, LpInterior(mc::InteriorElement(_))) => {
-                self.append_autoderefd_loan_path_to_str(&**lp_base, out);
+                self.append_autoderefd_loan_path_to_string(&**lp_base, out);
                 out.push_str("[..]");
             }
 
             LpExtend(ref lp_base, _, LpDeref(_)) => {
                 out.push_char('*');
-                self.append_loan_path_to_str(&**lp_base, out);
+                self.append_loan_path_to_string(&**lp_base, out);
             }
         }
     }
 
-    pub fn append_autoderefd_loan_path_to_str(&self,
+    pub fn append_autoderefd_loan_path_to_string(&self,
                                               loan_path: &LoanPath,
                                               out: &mut String) {
         match *loan_path {
@@ -753,23 +828,23 @@ impl<'a> BorrowckCtxt<'a> {
                 // For a path like `(*x).f` or `(*x)[3]`, autoderef
                 // rules would normally allow users to omit the `*x`.
                 // So just serialize such paths to `x.f` or x[3]` respectively.
-                self.append_autoderefd_loan_path_to_str(&**lp_base, out)
+                self.append_autoderefd_loan_path_to_string(&**lp_base, out)
             }
 
             LpVar(..) | LpUpvar(..) | LpExtend(_, _, LpInterior(..)) => {
-                self.append_loan_path_to_str(loan_path, out)
+                self.append_loan_path_to_string(loan_path, out)
             }
         }
     }
 
-    pub fn loan_path_to_str(&self, loan_path: &LoanPath) -> String {
+    pub fn loan_path_to_string(&self, loan_path: &LoanPath) -> String {
         let mut result = String::new();
-        self.append_loan_path_to_str(loan_path, &mut result);
+        self.append_loan_path_to_string(loan_path, &mut result);
         result
     }
 
-    pub fn cmt_to_str(&self, cmt: &mc::cmt_) -> String {
-        self.mc().cmt_to_str(cmt)
+    pub fn cmt_to_string(&self, cmt: &mc::cmt_) -> String {
+        self.mc().cmt_to_string(cmt)
     }
 }
 
@@ -815,11 +890,11 @@ impl Repr for LoanPath {
     fn repr(&self, tcx: &ty::ctxt) -> String {
         match self {
             &LpVar(id) => {
-                format!("$({})", tcx.map.node_to_str(id))
+                format!("$({})", tcx.map.node_to_string(id))
             }
 
             &LpUpvar(ty::UpvarId{ var_id, closure_expr_id }) => {
-                let s = tcx.map.node_to_str(var_id);
+                let s = tcx.map.node_to_string(var_id);
                 format!("$({} captured by id={})", s, closure_expr_id)
             }
 

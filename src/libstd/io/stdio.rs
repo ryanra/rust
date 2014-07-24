@@ -35,7 +35,7 @@ use iter::Iterator;
 use kinds::Send;
 use libc;
 use option::{Option, Some, None};
-use owned::Box;
+use boxed::Box;
 use result::{Ok, Err};
 use rt;
 use rt::local::Local;
@@ -391,7 +391,7 @@ mod tests {
             set_stdout(box w);
             println!("hello!");
         });
-        assert_eq!(r.read_to_str().unwrap(), "hello!\n".to_string());
+        assert_eq!(r.read_to_string().unwrap(), "hello!\n".to_string());
     })
 
     iotest!(fn capture_stderr() {
@@ -404,7 +404,7 @@ mod tests {
             ::realstd::io::stdio::set_stderr(box w);
             fail!("my special message");
         });
-        let s = r.read_to_str().unwrap();
+        let s = r.read_to_string().unwrap();
         assert!(s.as_slice().contains("my special message"));
     })
 }

@@ -10,11 +10,10 @@
 
 #![allow(dead_code)] // FFI wrappers
 
-use lib;
-use lib::llvm::llvm;
-use lib::llvm::{CallConv, AtomicBinOp, AtomicOrdering, AsmDialect};
-use lib::llvm::{Opcode, IntPredicate, RealPredicate, False};
-use lib::llvm::{ValueRef, BasicBlockRef, BuilderRef, ModuleRef};
+use llvm;
+use llvm::{CallConv, AtomicBinOp, AtomicOrdering, AsmDialect};
+use llvm::{Opcode, IntPredicate, RealPredicate, False};
+use llvm::{ValueRef, BasicBlockRef, BuilderRef, ModuleRef};
 use middle::trans::base;
 use middle::trans::common::*;
 use middle::trans::machine::llalign_of_pref;
@@ -31,9 +30,9 @@ pub struct Builder<'a> {
 
 // This is a really awful way to get a zero-length c-string, but better (and a
 // lot more efficient) than doing str::as_c_str("", ...) every time.
-pub fn noname() -> *c_char {
+pub fn noname() -> *const c_char {
     static cnull: c_char = 0;
-    &cnull as *c_char
+    &cnull as *const c_char
 }
 
 impl<'a> Builder<'a> {
@@ -159,6 +158,14 @@ impl<'a> Builder<'a> {
                   attributes: &[(uint, u64)])
                   -> ValueRef {
         self.count_insn("invoke");
+
+        debug!("Invoke {} with args ({})",
+               self.ccx.tn.val_to_string(llfn),
+               args.iter()
+                   .map(|&v| self.ccx.tn.val_to_string(v))
+                   .collect::<Vec<String>>()
+                   .connect(", "));
+
         unsafe {
             let v = llvm::LLVMBuildInvoke(self.llbuilder,
                                           llfn,
@@ -452,7 +459,7 @@ impl<'a> Builder<'a> {
         self.count_insn("load.volatile");
         unsafe {
             let insn = llvm::LLVMBuildLoad(self.llbuilder, ptr, noname());
-            llvm::LLVMSetVolatile(insn, lib::llvm::True);
+            llvm::LLVMSetVolatile(insn, llvm::True);
             insn
         }
     }
@@ -469,7 +476,7 @@ impl<'a> Builder<'a> {
 
 
     pub fn load_range_assert(&self, ptr: ValueRef, lo: c_ulonglong,
-                           hi: c_ulonglong, signed: lib::llvm::Bool) -> ValueRef {
+                           hi: c_ulonglong, signed: llvm::Bool) -> ValueRef {
         let value = self.load(ptr);
 
         unsafe {
@@ -479,7 +486,7 @@ impl<'a> Builder<'a> {
 
             let v = [min, max];
 
-            llvm::LLVMSetMetadata(value, lib::llvm::MD_range as c_uint,
+            llvm::LLVMSetMetadata(value, llvm::MD_range as c_uint,
                                   llvm::LLVMMDNodeInContext(self.ccx.llcx,
                                                             v.as_ptr(), v.len() as c_uint));
         }
@@ -489,8 +496,8 @@ impl<'a> Builder<'a> {
 
     pub fn store(&self, val: ValueRef, ptr: ValueRef) {
         debug!("Store {} -> {}",
-               self.ccx.tn.val_to_str(val),
-               self.ccx.tn.val_to_str(ptr));
+               self.ccx.tn.val_to_string(val),
+               self.ccx.tn.val_to_string(ptr));
         assert!(self.llbuilder.is_not_null());
         self.count_insn("store");
         unsafe {
@@ -500,20 +507,20 @@ impl<'a> Builder<'a> {
 
     pub fn volatile_store(&self, val: ValueRef, ptr: ValueRef) {
         debug!("Store {} -> {}",
-               self.ccx.tn.val_to_str(val),
-               self.ccx.tn.val_to_str(ptr));
+               self.ccx.tn.val_to_string(val),
+               self.ccx.tn.val_to_string(ptr));
         assert!(self.llbuilder.is_not_null());
         self.count_insn("store.volatile");
         unsafe {
             let insn = llvm::LLVMBuildStore(self.llbuilder, val, ptr);
-            llvm::LLVMSetVolatile(insn, lib::llvm::True);
+            llvm::LLVMSetVolatile(insn, llvm::True);
         }
     }
 
     pub fn atomic_store(&self, val: ValueRef, ptr: ValueRef, order: AtomicOrdering) {
         debug!("Store {} -> {}",
-               self.ccx.tn.val_to_str(val),
-               self.ccx.tn.val_to_str(ptr));
+               self.ccx.tn.val_to_string(val),
+               self.ccx.tn.val_to_string(ptr));
         self.count_insn("store.atomic");
         unsafe {
             let ty = Type::from_ref(llvm::LLVMTypeOf(ptr));
@@ -564,14 +571,14 @@ impl<'a> Builder<'a> {
         }
     }
 
-    pub fn global_string(&self, _str: *c_char) -> ValueRef {
+    pub fn global_string(&self, _str: *const c_char) -> ValueRef {
         self.count_insn("globalstring");
         unsafe {
             llvm::LLVMBuildGlobalString(self.llbuilder, _str, noname())
         }
     }
 
-    pub fn global_string_ptr(&self, _str: *c_char) -> ValueRef {
+    pub fn global_string_ptr(&self, _str: *const c_char) -> ValueRef {
         self.count_insn("globalstringptr");
         unsafe {
             llvm::LLVMBuildGlobalStringPtr(self.llbuilder, _str, noname())
@@ -752,7 +759,7 @@ impl<'a> Builder<'a> {
         if self.ccx.sess().asm_comments() {
             let s = format!("{} ({})",
                             text,
-                            self.ccx.sess().codemap().span_to_str(sp));
+                            self.ccx.sess().codemap().span_to_string(sp));
             debug!("{}", s.as_slice());
             self.add_comment(s.as_slice());
         }
@@ -774,23 +781,23 @@ impl<'a> Builder<'a> {
         }
     }
 
-    pub fn inline_asm_call(&self, asm: *c_char, cons: *c_char,
+    pub fn inline_asm_call(&self, asm: *const c_char, cons: *const c_char,
                          inputs: &[ValueRef], output: Type,
                          volatile: bool, alignstack: bool,
                          dia: AsmDialect) -> ValueRef {
         self.count_insn("inlineasm");
 
-        let volatile = if volatile { lib::llvm::True }
-                       else        { lib::llvm::False };
-        let alignstack = if alignstack { lib::llvm::True }
-                         else          { lib::llvm::False };
+        let volatile = if volatile { llvm::True }
+                       else        { llvm::False };
+        let alignstack = if alignstack { llvm::True }
+                         else          { llvm::False };
 
         let argtys = inputs.iter().map(|v| {
-            debug!("Asm Input Type: {:?}", self.ccx.tn.val_to_str(*v));
+            debug!("Asm Input Type: {:?}", self.ccx.tn.val_to_string(*v));
             val_ty(*v)
         }).collect::<Vec<_>>();
 
-        debug!("Asm Output Type: {:?}", self.ccx.tn.type_to_str(output));
+        debug!("Asm Output Type: {:?}", self.ccx.tn.type_to_string(output));
         let fty = Type::func(argtys.as_slice(), &output);
         unsafe {
             let v = llvm::LLVMInlineAsm(
@@ -804,9 +811,9 @@ impl<'a> Builder<'a> {
         self.count_insn("call");
 
         debug!("Call {} with args ({})",
-               self.ccx.tn.val_to_str(llfn),
+               self.ccx.tn.val_to_string(llfn),
                args.iter()
-                   .map(|&v| self.ccx.tn.val_to_str(v))
+                   .map(|&v| self.ccx.tn.val_to_string(v))
                    .collect::<Vec<String>>()
                    .connect(", "));
 
@@ -824,7 +831,7 @@ impl<'a> Builder<'a> {
                           conv: CallConv, attributes: &[(uint, u64)]) -> ValueRef {
         self.count_insn("callwithconv");
         let v = self.call(llfn, args, attributes);
-        lib::llvm::SetInstructionCallConv(v, conv);
+        llvm::SetInstructionCallConv(v, conv);
         v
     }
 
@@ -937,7 +944,7 @@ impl<'a> Builder<'a> {
     pub fn set_cleanup(&self, landing_pad: ValueRef) {
         self.count_insn("setcleanup");
         unsafe {
-            llvm::LLVMSetCleanup(landing_pad, lib::llvm::True);
+            llvm::LLVMSetCleanup(landing_pad, llvm::True);
         }
     }
 

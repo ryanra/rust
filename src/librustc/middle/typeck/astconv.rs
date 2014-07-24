@@ -52,13 +52,14 @@
 use middle::const_eval;
 use middle::def;
 use middle::lang_items::FnMutTraitLangItem;
-use rl = middle::resolve_lifetime;
 use middle::subst::{FnSpace, TypeSpace, SelfSpace, Subst, Substs};
 use middle::ty;
-use middle::typeck::TypeAndSubsts;
-use middle::typeck::lookup_def_tcx;
+use middle::ty_fold::TypeFolder;
+use middle::typeck::rscope::{ExplicitRscope, ImpliedSingleRscope};
 use middle::typeck::rscope::RegionScope;
-use middle::typeck::rscope;
+use middle::typeck::{TypeAndSubsts, infer, lookup_def_tcx, rscope};
+use middle::typeck;
+use rl = middle::resolve_lifetime;
 use util::ppaux::Repr;
 
 use std::rc::Rc;
@@ -66,7 +67,7 @@ use syntax::abi;
 use syntax::{ast, ast_util};
 use syntax::codemap::Span;
 use syntax::owned_slice::OwnedSlice;
-use syntax::print::pprust::{lifetime_to_str, path_to_str};
+use syntax::print::pprust::{lifetime_to_string, path_to_string};
 
 pub trait AstConv {
     fn tcx<'a>(&'a self) -> &'a ty::ctxt;
@@ -108,7 +109,7 @@ pub fn ast_region_to_region(tcx: &ty::ctxt, lifetime: &ast::Lifetime)
     };
 
     debug!("ast_region_to_region(lifetime={} id={}) yields {}",
-            lifetime_to_str(lifetime),
+            lifetime_to_string(lifetime),
             lifetime.id, r.repr(tcx));
 
     r
@@ -129,8 +130,8 @@ pub fn opt_ast_region_to_region<AC:AstConv,RS:RegionScope>(
             match rscope.anon_regions(default_span, 1) {
                 Err(()) => {
                     debug!("optional region in illegal location");
-                    this.tcx().sess.span_err(
-                        default_span, "missing lifetime specifier");
+                    span_err!(this.tcx().sess, default_span, E0106,
+                        "missing lifetime specifier");
                     ty::ReStatic
                 }
 
@@ -141,8 +142,8 @@ pub fn opt_ast_region_to_region<AC:AstConv,RS:RegionScope>(
         }
     };
 
-    debug!("opt_ast_region_to_region(opt_lifetime={:?}) yields {}",
-            opt_lifetime.as_ref().map(|e| lifetime_to_str(e)),
+    debug!("opt_ast_region_to_region(opt_lifetime={}) yields {}",
+            opt_lifetime.as_ref().map(|e| lifetime_to_string(e)),
             r.repr(this.tcx()));
 
     r
@@ -187,12 +188,9 @@ fn ast_path_substs<AC:AstConv,RS:RegionScope>(
             rscope.anon_regions(path.span, expected_num_region_params);
 
         if supplied_num_region_params != 0 || anon_regions.is_err() {
-            tcx.sess.span_err(
-                path.span,
-                format!("wrong number of lifetime parameters: \
-                        expected {} but found {}",
-                        expected_num_region_params,
-                        supplied_num_region_params).as_slice());
+            span_err!(tcx.sess, path.span, E0107,
+                "wrong number of lifetime parameters: expected {} but found {}",
+                expected_num_region_params, supplied_num_region_params);
         }
 
         match anon_regions {
@@ -203,7 +201,7 @@ fn ast_path_substs<AC:AstConv,RS:RegionScope>(
     };
 
     // Convert the type parameters supplied by the user.
-    let ty_param_defs = decl_generics.types.get_vec(TypeSpace);
+    let ty_param_defs = decl_generics.types.get_slice(TypeSpace);
     let supplied_ty_param_count = path.segments.iter().flat_map(|s| s.types.iter()).count();
     let formal_ty_param_count = ty_param_defs.len();
     let required_ty_param_count = ty_param_defs.iter()
@@ -235,10 +233,10 @@ fn ast_path_substs<AC:AstConv,RS:RegionScope>(
 
     if supplied_ty_param_count > required_ty_param_count
         && !this.tcx().sess.features.default_type_params.get() {
-        this.tcx().sess.span_err(path.span, "default type parameters are \
-                                             experimental and possibly buggy");
-        this.tcx().sess.span_note(path.span, "add #![feature(default_type_params)] \
-                                              to the crate attributes to enable");
+        span_err!(this.tcx().sess, path.span, E0108,
+            "default type parameters are experimental and possibly buggy");
+        span_note!(this.tcx().sess, path.span,
+            "add #![feature(default_type_params)] to the crate attributes to enable");
     }
 
     let tps = path.segments.iter().flat_map(|s| s.types.iter())
@@ -309,16 +307,14 @@ fn check_path_args(tcx: &ty::ctxt,
                    flags: uint) {
     if (flags & NO_TPS) != 0u {
         if !path.segments.iter().all(|s| s.types.is_empty()) {
-            tcx.sess.span_err(
-                path.span,
+            span_err!(tcx.sess, path.span, E0109,
                 "type parameters are not allowed on this type");
         }
     }
 
     if (flags & NO_REGIONS) != 0u {
         if !path.segments.last().unwrap().lifetimes.is_empty() {
-            tcx.sess.span_err(
-                path.span,
+            span_err!(tcx.sess, path.span, E0110,
                 "region parameters are not allowed on this type");
         }
     }
@@ -331,7 +327,7 @@ pub fn ast_ty_to_prim_ty(tcx: &ty::ctxt, ast_ty: &ast::Ty) -> Option<ty::t> {
                 None => {
                     tcx.sess.span_bug(ast_ty.span,
                                       format!("unbound path {}",
-                                              path_to_str(path)).as_slice())
+                                              path_to_string(path)).as_slice())
                 }
                 Some(&d) => d
             };
@@ -359,8 +355,8 @@ pub fn ast_ty_to_prim_ty(tcx: &ty::ctxt, ast_ty: &ast::Ty) -> Option<ty::t> {
                             Some(ty::mk_mach_float(ft))
                         }
                         ast::TyStr => {
-                            tcx.sess.span_err(ast_ty.span,
-                                              "bare `str` is not a type");
+                            span_err!(tcx.sess, ast_ty.span, E0037,
+                                      "bare `str` is not a type");
                             // return /something/ so they can at least get more errors
                             Some(ty::mk_uniq(tcx, ty::mk_str(tcx)))
                         }
@@ -394,7 +390,7 @@ pub fn ast_ty_to_builtin_ty<AC:AstConv,
                         .sess
                         .span_bug(ast_ty.span,
                                   format!("unbound path {}",
-                                          path_to_str(path)).as_slice())
+                                          path_to_string(path)).as_slice())
                 }
                 Some(&d) => d
             };
@@ -408,10 +404,8 @@ pub fn ast_ty_to_builtin_ty<AC:AstConv,
                            .iter()
                            .flat_map(|s| s.types.iter())
                            .count() > 1 {
-                        this.tcx()
-                            .sess
-                            .span_err(path.span,
-                                      "`Box` has only one type parameter")
+                        span_err!(this.tcx().sess, path.span, E0047,
+                                  "`Box` has only one type parameter");
                     }
 
                     for inner_ast_type in path.segments
@@ -428,16 +422,12 @@ pub fn ast_ty_to_builtin_ty<AC:AstConv,
                                                |typ| {
                             match ty::get(typ).sty {
                                 ty::ty_str => {
-                                    this.tcx()
-                                        .sess
-                                        .span_err(path.span,
-                                                  "`Box<str>` is not a type");
+                                    span_err!(this.tcx().sess, path.span, E0111,
+                                              "`Box<str>` is not a type");
                                     ty::mk_err()
                                 }
                                 ty::ty_vec(_, None) => {
-                                    this.tcx()
-                                        .sess
-                                        .span_err(path.span,
+                                        span_err!(this.tcx().sess, path.span, E0112,
                                                   "`Box<[T]>` is not a type");
                                     ty::mk_err()
                                 }
@@ -445,9 +435,8 @@ pub fn ast_ty_to_builtin_ty<AC:AstConv,
                             }
                         }))
                     }
-                    this.tcx().sess.span_err(path.span,
-                                             "not enough type parameters \
-                                              supplied to `Box<T>`");
+                    span_err!(this.tcx().sess, path.span, E0113,
+                              "not enough type parameters supplied to `Box<T>`");
                     Some(ty::mk_err())
                 }
                 def::DefTy(did) | def::DefStruct(did)
@@ -456,10 +445,8 @@ pub fn ast_ty_to_builtin_ty<AC:AstConv,
                            .iter()
                            .flat_map(|s| s.types.iter())
                            .count() > 1 {
-                        this.tcx()
-                            .sess
-                            .span_err(path.span,
-                                      "`Gc` has only one type parameter")
+                        span_err!(this.tcx().sess, path.span, E0048,
+                                  "`Gc` has only one type parameter");
                     }
 
                     for inner_ast_type in path.segments
@@ -476,17 +463,13 @@ pub fn ast_ty_to_builtin_ty<AC:AstConv,
                                                |typ| {
                             match ty::get(typ).sty {
                                 ty::ty_str => {
-                                    this.tcx()
-                                        .sess
-                                        .span_err(path.span,
-                                                  "`Gc<str>` is not a type");
+                                    span_err!(this.tcx().sess, path.span, E0114,
+                                              "`Gc<str>` is not a type");
                                     ty::mk_err()
                                 }
                                 ty::ty_vec(_, None) => {
-                                    this.tcx()
-                                        .sess
-                                        .span_err(path.span,
-                                                  "`Gc<[T]>` is not a type");
+                                    span_err!(this.tcx().sess, path.span, E0115,
+                                              "`Gc<[T]>` is not a type");
                                     ty::mk_err()
                                 }
                                 _ => ty::mk_box(this.tcx(), typ),
@@ -504,6 +487,7 @@ pub fn ast_ty_to_builtin_ty<AC:AstConv,
     }
 }
 
+#[deriving(Show)]
 enum PointerTy {
     Box,
     RPtr(ty::Region),
@@ -565,7 +549,7 @@ fn mk_pointer<AC:AstConv,
               constr: |ty::t| -> ty::t)
               -> ty::t {
     let tcx = this.tcx();
-    debug!("mk_pointer(ptr_ty={:?})", ptr_ty);
+    debug!("mk_pointer(ptr_ty={})", ptr_ty);
 
     match a_seq_ty.ty.node {
         ast::TyVec(ref ty) => {
@@ -761,6 +745,7 @@ pub fn ast_ty_to_ty<AC:AstConv, RS:RegionScope>(
                                             bounds,
                                             store,
                                             &*f.decl,
+                                            abi::Rust,
                                             None);
                 ty::mk_closure(tcx, fn_decl)
             }
@@ -779,6 +764,7 @@ pub fn ast_ty_to_ty<AC:AstConv, RS:RegionScope>(
                                             bounds,
                                             ty::UniqTraitStore,
                                             &*f.decl,
+                                            abi::Rust,
                                             None);
                 ty::mk_closure(tcx, fn_decl)
             }
@@ -793,7 +779,7 @@ pub fn ast_ty_to_ty<AC:AstConv, RS:RegionScope>(
                         tcx.sess
                            .span_bug(ast_ty.span,
                                      format!("unbound path {}",
-                                             path_to_str(path)).as_slice())
+                                             path_to_string(path)).as_slice())
                     }
                     Some(&d) => d
                 };
@@ -808,7 +794,7 @@ pub fn ast_ty_to_ty<AC:AstConv, RS:RegionScope>(
                 }
                 match a_def {
                     def::DefTrait(_) => {
-                        let path_str = path_to_str(path);
+                        let path_str = path_to_string(path);
                         tcx.sess.span_err(
                             ast_ty.span,
                             format!("reference to trait `{name}` where a \
@@ -835,7 +821,7 @@ pub fn ast_ty_to_ty<AC:AstConv, RS:RegionScope>(
                     def::DefMod(id) => {
                         tcx.sess.span_fatal(ast_ty.span,
                             format!("found module name used as a type: {}",
-                                    tcx.map.node_to_str(id.node)).as_slice());
+                                    tcx.map.node_to_string(id.node)).as_slice());
                     }
                     def::DefPrimTy(_) => {
                         fail!("DefPrimTy arm missed in previous ast_ty_to_prim_ty call");
@@ -878,9 +864,9 @@ pub fn ast_ty_to_ty<AC:AstConv, RS:RegionScope>(
             }
             ast::TyInfer => {
                 // TyInfer also appears as the type of arguments or return
-                // values in a ExprFnBlock or ExprProc, or as the type of
-                // local variables. Both of these cases are handled specially
-                // and will not descend into this routine.
+                // values in a ExprFnBlock, ExprProc, or ExprUnboxedFn, or as
+                // the type of local variables. Both of these cases are
+                // handled specially and will not descend into this routine.
                 this.ty_infer(ast_ty.span)
             }
         }
@@ -899,62 +885,92 @@ pub fn ty_of_arg<AC: AstConv, RS: RegionScope>(this: &AC, rscope: &RS, a: &ast::
     }
 }
 
-struct SelfInfo {
+struct SelfInfo<'a> {
     untransformed_self_ty: ty::t,
-    explicit_self: ast::ExplicitSelf
+    explicit_self: ast::ExplicitSelf,
 }
 
 pub fn ty_of_method<AC:AstConv>(
-    this: &AC,
-    id: ast::NodeId,
-    fn_style: ast::FnStyle,
-    untransformed_self_ty: ty::t,
-    explicit_self: ast::ExplicitSelf,
-    decl: &ast::FnDecl)
-    -> ty::BareFnTy
-{
-    ty_of_method_or_bare_fn(this, id, fn_style, abi::Rust, Some(SelfInfo {
+                    this: &AC,
+                    id: ast::NodeId,
+                    fn_style: ast::FnStyle,
+                    untransformed_self_ty: ty::t,
+                    explicit_self: ast::ExplicitSelf,
+                    decl: &ast::FnDecl,
+                    abi: abi::Abi)
+                    -> (ty::BareFnTy, ty::ExplicitSelfCategory) {
+    let self_info = Some(SelfInfo {
         untransformed_self_ty: untransformed_self_ty,
-        explicit_self: explicit_self
-    }), decl)
+        explicit_self: explicit_self,
+    });
+    let (bare_fn_ty, optional_explicit_self_category) =
+        ty_of_method_or_bare_fn(this,
+                                id,
+                                fn_style,
+                                abi,
+                                self_info,
+                                decl);
+    (bare_fn_ty, optional_explicit_self_category.unwrap())
 }
 
 pub fn ty_of_bare_fn<AC:AstConv>(this: &AC, id: ast::NodeId,
                                  fn_style: ast::FnStyle, abi: abi::Abi,
                                  decl: &ast::FnDecl) -> ty::BareFnTy {
-    ty_of_method_or_bare_fn(this, id, fn_style, abi, None, decl)
+    let (bare_fn_ty, _) =
+        ty_of_method_or_bare_fn(this, id, fn_style, abi, None, decl);
+    bare_fn_ty
 }
 
-fn ty_of_method_or_bare_fn<AC:AstConv>(this: &AC, id: ast::NodeId,
-                                       fn_style: ast::FnStyle, abi: abi::Abi,
-                                       opt_self_info: Option<SelfInfo>,
-                                       decl: &ast::FnDecl) -> ty::BareFnTy {
+fn ty_of_method_or_bare_fn<AC:AstConv>(
+                           this: &AC,
+                           id: ast::NodeId,
+                           fn_style: ast::FnStyle,
+                           abi: abi::Abi,
+                           opt_self_info: Option<SelfInfo>,
+                           decl: &ast::FnDecl)
+                           -> (ty::BareFnTy,
+                               Option<ty::ExplicitSelfCategory>) {
     debug!("ty_of_method_or_bare_fn");
 
-    // new region names that appear inside of the fn decl are bound to
-    // that function type
+    // New region names that appear inside of the arguments of the function
+    // declaration are bound to that function type.
     let rb = rscope::BindingRscope::new(id);
 
-    let self_ty = opt_self_info.and_then(|self_info| {
-        match self_info.explicit_self.node {
-            ast::SelfStatic => None,
-            ast::SelfValue => {
-                Some(self_info.untransformed_self_ty)
-            }
-            ast::SelfRegion(ref lifetime, mutability) => {
-                let region =
-                    opt_ast_region_to_region(this, &rb,
-                                             self_info.explicit_self.span,
-                                             lifetime);
-                Some(ty::mk_rptr(this.tcx(), region,
-                                 ty::mt {ty: self_info.untransformed_self_ty,
-                                         mutbl: mutability}))
-            }
-            ast::SelfUniq => {
-                Some(ty::mk_uniq(this.tcx(), self_info.untransformed_self_ty))
+    // `implied_output_region` is the region that will be assumed for any
+    // region parameters in the return type. In accordance with the rules for
+    // lifetime elision, we can determine it in two ways. First (determined
+    // here), if self is by-reference, then the implied output region is the
+    // region of the self parameter.
+    let mut explicit_self_category_result = None;
+    let (self_ty, mut implied_output_region) = match opt_self_info {
+        None => (None, None),
+        Some(self_info) => {
+            // Figure out and record the explicit self category.
+            let explicit_self_category =
+                determine_explicit_self_category(this, &rb, &self_info);
+            explicit_self_category_result = Some(explicit_self_category);
+            match explicit_self_category {
+                ty::StaticExplicitSelfCategory => (None, None),
+                ty::ByValueExplicitSelfCategory => {
+                    (Some(self_info.untransformed_self_ty), None)
+                }
+                ty::ByReferenceExplicitSelfCategory(region, mutability) => {
+                    (Some(ty::mk_rptr(this.tcx(),
+                                      region,
+                                      ty::mt {
+                                        ty: self_info.untransformed_self_ty,
+                                        mutbl: mutability
+                                      })),
+                     Some(region))
+                }
+                ty::ByBoxExplicitSelfCategory => {
+                    (Some(ty::mk_uniq(this.tcx(),
+                                      self_info.untransformed_self_ty)),
+                     None)
+                }
             }
         }
-    });
+    };
 
     // HACK(eddyb) replace the fake self type in the AST with the actual type.
     let input_tys = if self_ty.is_some() {
@@ -963,15 +979,50 @@ fn ty_of_method_or_bare_fn<AC:AstConv>(this: &AC, id: ast::NodeId,
         decl.inputs.as_slice()
     };
     let input_tys = input_tys.iter().map(|a| ty_of_arg(this, &rb, a, None));
+    let self_and_input_tys: Vec<_> =
+        self_ty.move_iter().chain(input_tys).collect();
 
-    let self_and_input_tys = self_ty.move_iter().chain(input_tys).collect();
+    // Second, if there was exactly one lifetime (either a substitution or a
+    // reference) in the arguments, then any anonymous regions in the output
+    // have that lifetime.
+    if implied_output_region.is_none() {
+        let mut self_and_input_tys_iter = self_and_input_tys.iter();
+        if self_ty.is_some() {
+            // Skip the first argument if `self` is present.
+            drop(self_and_input_tys_iter.next())
+        }
+
+        let mut accumulator = Vec::new();
+        for input_type in self_and_input_tys_iter {
+            ty::accumulate_lifetimes_in_type(&mut accumulator, *input_type)
+        }
+        if accumulator.len() == 1 {
+            implied_output_region = Some(*accumulator.get(0));
+        }
+    }
 
     let output_ty = match decl.output.node {
         ast::TyInfer => this.ty_infer(decl.output.span),
-        _ => ast_ty_to_ty(this, &rb, &*decl.output)
+        _ => {
+            match implied_output_region {
+                Some(implied_output_region) => {
+                    let rb = ImpliedSingleRscope {
+                        region: implied_output_region,
+                    };
+                    ast_ty_to_ty(this, &rb, &*decl.output)
+                }
+                None => {
+                    // All regions must be explicitly specified in the output
+                    // if the lifetime elision rules do not apply. This saves
+                    // the user from potentially-confusing errors.
+                    let rb = ExplicitRscope;
+                    ast_ty_to_ty(this, &rb, &*decl.output)
+                }
+            }
+        }
     };
 
-    return ty::BareFnTy {
+    (ty::BareFnTy {
         fn_style: fn_style,
         abi: abi,
         sig: ty::FnSig {
@@ -980,7 +1031,83 @@ fn ty_of_method_or_bare_fn<AC:AstConv>(this: &AC, id: ast::NodeId,
             output: output_ty,
             variadic: decl.variadic
         }
-    };
+    }, explicit_self_category_result)
+}
+
+fn determine_explicit_self_category<AC:AstConv,
+                                    RS:RegionScope>(
+                                    this: &AC,
+                                    rscope: &RS,
+                                    self_info: &SelfInfo)
+                                    -> ty::ExplicitSelfCategory {
+    match self_info.explicit_self.node {
+        ast::SelfStatic => ty::StaticExplicitSelfCategory,
+        ast::SelfValue(_) => ty::ByValueExplicitSelfCategory,
+        ast::SelfRegion(ref lifetime, mutability, _) => {
+            let region =
+                opt_ast_region_to_region(this,
+                                         rscope,
+                                         self_info.explicit_self.span,
+                                         lifetime);
+            ty::ByReferenceExplicitSelfCategory(region, mutability)
+        }
+        ast::SelfUniq(_) => ty::ByBoxExplicitSelfCategory,
+        ast::SelfExplicit(ast_type, _) => {
+            let explicit_type = ast_ty_to_ty(this, rscope, &*ast_type);
+
+            {
+                let inference_context = infer::new_infer_ctxt(this.tcx());
+                let expected_self = self_info.untransformed_self_ty;
+                let actual_self = explicit_type;
+                let result = infer::mk_eqty(
+                    &inference_context,
+                    false,
+                    infer::Misc(self_info.explicit_self.span),
+                    expected_self,
+                    actual_self);
+                match result {
+                    Ok(_) => {
+                        inference_context.resolve_regions_and_report_errors();
+                        return ty::ByValueExplicitSelfCategory
+                    }
+                    Err(_) => {}
+                }
+            }
+
+            match ty::get(explicit_type).sty {
+                ty::ty_rptr(region, tm) => {
+                    typeck::require_same_types(
+                        this.tcx(),
+                        None,
+                        false,
+                        self_info.explicit_self.span,
+                        self_info.untransformed_self_ty,
+                        tm.ty,
+                        || "not a valid type for `self`".to_owned());
+                    return ty::ByReferenceExplicitSelfCategory(region,
+                                                               tm.mutbl)
+                }
+                ty::ty_uniq(typ) => {
+                    typeck::require_same_types(
+                        this.tcx(),
+                        None,
+                        false,
+                        self_info.explicit_self.span,
+                        self_info.untransformed_self_ty,
+                        typ,
+                        || "not a valid type for `self`".to_owned());
+                    return ty::ByBoxExplicitSelfCategory
+                }
+                _ => {
+                    this.tcx()
+                        .sess
+                        .span_err(self_info.explicit_self.span,
+                                  "not a valid type for `self`");
+                    return ty::ByValueExplicitSelfCategory
+                }
+            }
+        }
+    }
 }
 
 pub fn ty_of_closure<AC:AstConv>(
@@ -991,6 +1118,7 @@ pub fn ty_of_closure<AC:AstConv>(
     bounds: ty::BuiltinBounds,
     store: ty::TraitStore,
     decl: &ast::FnDecl,
+    abi: abi::Abi,
     expected_sig: Option<ty::FnSig>)
     -> ty::ClosureTy
 {
@@ -1025,6 +1153,7 @@ pub fn ty_of_closure<AC:AstConv>(
         onceness: onceness,
         store: store,
         bounds: bounds,
+        abi: abi,
         sig: ty::FnSig {binder_id: id,
                         inputs: input_tys,
                         output: output_ty,
@@ -1097,3 +1226,4 @@ fn conv_builtin_bounds(tcx: &ty::ctxt,
         (&None, ty::UniqTraitStore) => ty::empty_builtin_bounds(),
     }
 }
+

@@ -78,7 +78,7 @@
 //! passing. [`sync`](sync/index.html) contains further, primitive, shared
 //! memory types, including [`atomics`](sync/atomics/index.html).
 //!
-//! Common types of I/O, including files, TCP, UPD, pipes, Unix domain sockets,
+//! Common types of I/O, including files, TCP, UDP, pipes, Unix domain sockets,
 //! timers, and process spawning, are defined in the [`io`](io/index.html) module.
 //!
 //! Rust's I/O and concurrency depends on a small runtime interface
@@ -94,14 +94,15 @@
 //! all the standard macros, such as `assert!`, `fail!`, `println!`,
 //! and `format!`, also available to all Rust code.
 
-#![crate_id = "std#0.11.0"]
+#![crate_name = "std"]
+#![unstable]
 #![comment = "The Rust standard library"]
 #![license = "MIT/ASL2"]
 #![crate_type = "rlib"]
 #![crate_type = "dylib"]
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
        html_favicon_url = "http://www.rust-lang.org/favicon.ico",
-       html_root_url = "http://doc.rust-lang.org/0.11.0/",
+       html_root_url = "http://doc.rust-lang.org/master/",
        html_playground_url = "http://play.rust-lang.org/")]
 
 #![feature(macro_rules, globs, managed_boxes, linkage)]
@@ -111,7 +112,6 @@
 #![no_std]
 
 #![allow(deprecated)]
-#![allow(unknown_features)] // NOTE: remove after stage0 snapshot
 #![deny(missing_doc)]
 
 // When testing libstd, bring in libuv as the I/O backend so tests can print
@@ -124,6 +124,7 @@
 #[cfg(test)] #[phase(plugin, link)] extern crate log;
 
 extern crate alloc;
+extern crate unicode;
 extern crate core;
 extern crate core_collections = "collections";
 extern crate core_rand = "rand";
@@ -137,7 +138,7 @@ extern crate rustrt;
 #[cfg(test)] pub use realstd::ops;
 #[cfg(test)] pub use realstd::cmp;
 #[cfg(test)] pub use realstd::ty;
-#[cfg(test)] pub use realstd::owned;
+#[cfg(test)] pub use realstd::boxed;
 #[cfg(test)] pub use realstd::gc;
 
 
@@ -147,7 +148,6 @@ pub use core::one;
 pub use core::any;
 pub use core::bool;
 pub use core::cell;
-pub use core::char;
 pub use core::clone;
 #[cfg(not(test))] pub use core::cmp;
 pub use core::default;
@@ -161,14 +161,19 @@ pub use core::ptr;
 pub use core::raw;
 pub use core::simd;
 pub use core::tuple;
+// FIXME #15320: primitive documentation needs top-level modules, this
+// should be `std::tuple::unit`.
+pub use core::unit;
 #[cfg(not(test))] pub use core::ty;
 pub use core::result;
 pub use core::option;
 
-pub use alloc::owned;
+pub use alloc::boxed;
+#[deprecated = "use boxed instead"]
+pub use owned = boxed;
+
 pub use alloc::rc;
 
-pub use core_collections::hash;
 pub use core_collections::slice;
 pub use core_collections::str;
 pub use core_collections::string;
@@ -176,6 +181,8 @@ pub use core_collections::vec;
 
 #[cfg(not(kernel))] pub use rustrt::c_str;
 #[cfg(not(kernel))] pub use rustrt::local_data;
+
+pub use unicode::char;
 
 #[cfg(not(kernel))] pub use core_sync::comm;
 
@@ -185,7 +192,7 @@ pub use core_collections::vec;
 //        threading mode than the default by reaching into the auto-generated
 //        '__test' module.
 #[cfg(test)] #[start]
-fn start(argc: int, argv: **u8) -> int {
+fn start(argc: int, argv: *const *const u8) -> int {
     green::start(argc, argv, rustuv::event_loop, __test::main)
 }
 
@@ -238,6 +245,7 @@ pub mod to_str;
 /* Common data structures */
 
 pub mod collections;
+pub mod hash;
 
 /* Tasks and communication */
 
@@ -268,8 +276,7 @@ mod std {
     pub use clone;
     pub use cmp;
     pub use hash;
-    pub use macros;
-    
+
     #[cfg(not(kernel))] pub use comm; // used for select!()
     pub use fmt; // used for any formatting strings
     #[cfg(not(kernel))] pub use io; // used for println!()
@@ -277,17 +284,9 @@ mod std {
     pub use option; // used for bitflags!()
     #[cfg(not(kernel))] pub use rt; // used for fail!()
     pub use vec; // used for vec![]
-
+    pub use macros; // added this because we call a fn in macros
     // The test runner calls ::std::os::args() but really wants realstd
     #[cfg(test)] pub use os = realstd::os;
     // The test runner requires std::slice::Vector, so re-export std::slice just for it.
     #[cfg(test)] pub use slice;
-}
-
-#[deprecated]
-#[allow(missing_doc)]
-#[doc(hiden)]
-pub mod unstable {
-    #[deprecated = "use std::dynamic_lib"]
-    #[cfg(not(kernel))] pub use dynamic_lib;
 }

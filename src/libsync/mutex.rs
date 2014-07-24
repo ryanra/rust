@@ -59,7 +59,7 @@
 
 use core::prelude::*;
 
-use alloc::owned::Box;
+use alloc::boxed::Box;
 use core::atomics;
 use core::kinds::marker;
 use core::mem;
@@ -215,7 +215,7 @@ impl StaticMutex {
             None => {}
         }
 
-        // After we've failed the fast path, then we delegate to the differnet
+        // After we've failed the fast path, then we delegate to the different
         // locking protocols for green/native tasks. This will select two tasks
         // to continue further (one native, one green).
         let t: Box<Task> = Local::take();

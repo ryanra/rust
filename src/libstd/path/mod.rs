@@ -35,8 +35,8 @@ code, `Path` should be used to refer to the platform-native path.
 Creation of a path is typically done with either `Path::new(some_str)` or
 `Path::new(some_vec)`. This path can be modified with `.push()` and
 `.pop()` (and other setters). The resulting Path can either be passed to another
-API that expects a path, or can be turned into a &[u8] with `.as_vec()` or a
-Option<&str> with `.as_str()`. Similarly, attributes of the path can be queried
+API that expects a path, or can be turned into a `&[u8]` with `.as_vec()` or a
+`Option<&str>` with `.as_str()`. Similarly, attributes of the path can be queried
 with methods such as `.filename()`. There are also methods that return a new
 path instead of modifying the receiver, such as `.join()` or `.dir_path()`.
 
@@ -63,6 +63,8 @@ println!("path exists: {}", path.exists());
 
 */
 
+#![experimental]
+
 use collections::Collection;
 use c_str::CString;
 use clone::Clone;
@@ -70,7 +72,7 @@ use fmt;
 use iter::Iterator;
 use option::{Option, None, Some};
 use str;
-use str::{MaybeOwned, Str, StrSlice, from_utf8_lossy};
+use str::{MaybeOwned, Str, StrSlice};
 use string::String;
 use slice::Vector;
 use slice::{ImmutableEqVector, ImmutableVector};
@@ -481,7 +483,7 @@ impl<'a, P: GenericPath> Display<'a, P> {
     /// unicode replacement char. This involves allocation.
     #[inline]
     pub fn as_maybe_owned(&self) -> MaybeOwned<'a> {
-        from_utf8_lossy(if self.filename {
+        String::from_utf8_lossy(if self.filename {
             match self.path.filename() {
                 None => &[],
                 Some(v) => v

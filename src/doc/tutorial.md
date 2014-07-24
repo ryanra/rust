@@ -262,7 +262,7 @@ write function, variable, and module names with lowercase letters, using
 underscores where they help readability, while writing types in camel case.
 
 ~~~
-let my_variable = 100;
+let my_variable = 100i;
 type MyType = int;     // primitive types are _not_ camel case
 ~~~
 
@@ -276,7 +276,7 @@ write a piece of code like this:
 
 ~~~~
 # let item = "salad";
-let price;
+let price: f64;
 if item == "salad" {
     price = 3.50;
 } else if item == "muffin" {
@@ -290,7 +290,7 @@ But, in Rust, you don't have to repeat the name `price`:
 
 ~~~~
 # let item = "salad";
-let price =
+let price: f64 =
     if item == "salad" {
         3.50
     } else if item == "muffin" {
@@ -337,11 +337,10 @@ suffix that can be used to indicate the type of a literal: `i` for `int`,
 In the absence of an integer literal suffix, Rust will infer the
 integer type based on type annotations and function signatures in the
 surrounding program. In the absence of any type information at all,
-Rust will assume that an unsuffixed integer literal has type
-`int`.
+Rust will report an error and request that the type be specified explicitly.
 
 ~~~~
-let a = 1;       // `a` is an `int`
+let a: int = 1;  // `a` is an `int`
 let b = 10i;     // `b` is an `int`, due to the `i` suffix
 let c = 100u;    // `c` is a `uint`
 let d = 1000i32; // `d` is an `i32`
@@ -470,12 +469,12 @@ fn signum(x: int) -> int {
 
 Rust's `match` construct is a generalized, cleaned-up version of C's
 `switch` construct. You provide it with a value and a number of
-*arms*, each labelled with a pattern, and the code compares the value
+*arms*, each labeled with a pattern, and the code compares the value
 against each pattern in order until one matches. The matching pattern
 executes its corresponding arm.
 
 ~~~~
-let my_number = 1;
+let my_number = 1i;
 match my_number {
   0     => println!("zero"),
   1 | 2 => println!("one or two"),
@@ -501,7 +500,7 @@ matches any single value. (`..`) is a different wildcard that can match
 one or more fields in an `enum` variant.
 
 ~~~
-# let my_number = 1;
+# let my_number = 1i;
 match my_number {
   0 => { println!("zero") }
   _ => { println!("something else") }
@@ -584,7 +583,7 @@ keyword `break` aborts the loop, and `continue` aborts the current
 iteration and continues with the next.
 
 ~~~~
-let mut cake_amount = 8;
+let mut cake_amount = 8i;
 while cake_amount > 0 {
     cake_amount -= 1;
 }
@@ -717,8 +716,8 @@ When an enum has simple integer discriminators, you can apply the `as` cast
 operator to convert a variant to its discriminator value as an `int`:
 
 ~~~~
-# #[deriving(Show)] enum Direction { North }
-println!( "{} => {}", North, North as int );
+# enum Direction { North, East, South, West }
+println!( "North => {}", North as int );
 ~~~~
 
 It is possible to set the discriminator values to chosen constant values:
@@ -749,8 +748,15 @@ includes an identifier of the actual form that it holds, much like the
 
 This declaration defines a type `Shape` that can refer to such shapes, and two
 functions, `Circle` and `Rectangle`, which can be used to construct values of
-the type. To create a new Circle, write `Circle(Point { x: 0.0, y: 0.0 },
-10.0)`.
+the type.
+
+To create a new `Circle`, write:
+
+~~~~
+# struct Point { x: f64, y: f64 }
+# enum Shape { Circle(Point, f64), Rectangle(Point, Point) }
+let circle = Circle(Point { x: 0.0, y: 0.0 }, 10.0);
+~~~~
 
 All of these variant constructors may be used as patterns. The only way to
 access the contents of an enum instance is the destructuring of a match. For
@@ -758,6 +764,7 @@ example:
 
 ~~~~
 use std::f64;
+
 # struct Point {x: f64, y: f64}
 # enum Shape { Circle(Point, f64), Rectangle(Point, Point) }
 fn area(sh: Shape) -> f64 {
@@ -766,6 +773,9 @@ fn area(sh: Shape) -> f64 {
         Rectangle(Point { x, y }, Point { x: x2, y: y2 }) => (x2 - x) * (y2 - y)
     }
 }
+
+let rect = Rectangle(Point { x: 0.0, y: 0.0 }, Point { x: 2.0, y: 2.0 });
+println!("area: {}", area(rect));
 ~~~~
 
 Use a lone `_` to ignore an individual field. Ignore all fields of a variant
@@ -787,8 +797,9 @@ fn point_from_direction(dir: Direction) -> Point {
 Enum variants may also be structs. For example:
 
 ~~~~
-# #![feature(struct_variant)]
+#![feature(struct_variant)]
 use std::f64;
+
 # struct Point { x: f64, y: f64 }
 # fn square(x: f64) -> f64 { x * x }
 enum Shape {
@@ -803,7 +814,14 @@ fn area(sh: Shape) -> f64 {
         }
     }
 }
-# fn main() {}
+
+fn main() {
+    let rect = Rectangle {
+        top_left: Point { x: 0.0, y: 0.0 },
+        bottom_right: Point { x: 2.0, y: -2.0 }
+    };
+    println!("area: {}", area(rect));
+}
 ~~~~
 
 > *Note:* This feature of the compiler is currently gated behind the
@@ -944,7 +962,7 @@ The `box` operator performs memory allocation on the heap:
 ~~~~
 {
     // an integer allocated on the heap
-    let y = box 10;
+    let y = box 10i;
 }
 // the destructor frees the heap memory as soon as `y` goes out of scope
 ~~~~
@@ -980,12 +998,16 @@ let mut b = Foo { x: 5, y: box 10 };
 b.x = 10;
 ~~~~
 
-If an object doesn't contain any non-Send types, it consists of a single
+If an object doesn't contain any non-`Send` types, it consists of a single
 ownership tree and is itself given the `Send` trait which allows it to be sent
 between tasks. Custom destructors can only be implemented directly on types
 that are `Send`, but non-`Send` types can still *contain* types with custom
 destructors. Example of types which are not `Send` are [`Gc<T>`][gc] and
 [`Rc<T>`][rc], the shared-ownership types.
+
+> *Note:* See a [later chapter](#ownership-escape-hatches) for a discussion about
+> [`Gc<T>`][gc] and [`Rc<T>`][rc], and the [chapter about traits](#traits) for
+> a discussion about `Send`.
 
 [gc]: http://doc.rust-lang.org/std/gc/struct.Gc.html
 [rc]: http://doc.rust-lang.org/std/rc/struct.Rc.html
@@ -1165,7 +1187,7 @@ let z = x;
 The mutability of a value may be changed by moving it to a new owner:
 
 ~~~~
-let r = box 13;
+let r = box 13i;
 let mut s = r; // box becomes mutable
 *s += 1;
 let t = s; // box becomes immutable
@@ -1285,9 +1307,9 @@ Using the generic `List<T>` works much like before, thanks to type inference:
 #     Cons(value, box xs)
 # }
 let mut xs = Nil; // Unknown type! This is a `List<T>`, but `T` can be anything.
-xs = prepend(xs, 10); // Here the compiler infers `xs`'s type as `List<int>`.
-xs = prepend(xs, 15);
-xs = prepend(xs, 20);
+xs = prepend(xs, 10i); // Here the compiler infers `xs`'s type as `List<int>`.
+xs = prepend(xs, 15i);
+xs = prepend(xs, 20i);
 ~~~
 
 The code sample above demonstrates type inference making most type annotations optional. It is
@@ -1410,12 +1432,12 @@ Beyond the properties granted by the size, an owned box behaves as a regular
 value by inheriting the mutability and lifetime of the owner:
 
 ~~~~
-let x = 5; // immutable
-let mut y = 5; // mutable
+let x = 5i; // immutable
+let mut y = 5i; // mutable
 y += 2;
 
-let x = box 5; // immutable
-let mut y = box 5; // mutable
+let x = box 5i; // immutable
+let mut y = box 5i; // mutable
 *y += 2; // the `*` operator is needed to access the contained value
 ~~~~
 
@@ -1471,7 +1493,7 @@ Now we can call `compute_distance()` in various ways:
 # let on_the_stack :     Point  =     Point { x: 3.0, y: 4.0 };
 # let on_the_heap  : Box<Point> = box Point { x: 7.0, y: 9.0 };
 # fn compute_distance(p1: &Point, p2: &Point) -> f64 { 0.0 }
-compute_distance(&on_the_stack, on_the_heap);
+compute_distance(&on_the_stack, &*on_the_heap);
 ~~~
 
 Here the `&` operator is used to take the address of the variable
@@ -1481,11 +1503,9 @@ reference. We also call this _borrowing_ the local variable
 `on_the_stack`, because we are creating an alias: that is, another
 route to the same data.
 
-In the case of `owned_box`, however, no
-explicit action is necessary. The compiler will automatically convert
-a box `box point` to a reference like
-`&point`. This is another form of borrowing; in this case, the
-contents of the owned box are being lent out.
+Likewise, in the case of `owned_box`,
+the `&` operator is used in conjunction with the `*` operator
+to take a reference to the contents of the box.
 
 Whenever a value is borrowed, there are some limitations on what you
 can do with the original. For example, if the contents of a variable
@@ -1507,7 +1527,7 @@ freezing enforced statically at compile-time. An example of a non-`Freeze` type
 is [`RefCell<T>`][refcell].
 
 ~~~~
-let mut x = 5;
+let mut x = 5i;
 {
     let y = &x; // `x` is now frozen. It cannot be modified or re-assigned.
 }
@@ -1523,8 +1543,8 @@ Rust uses the unary star operator (`*`) to access the contents of a
 box or pointer, similarly to C.
 
 ~~~
-let owned = box 10;
-let borrowed = &20;
+let owned = box 10i;
+let borrowed = &20i;
 
 let sum = *owned + *borrowed;
 ~~~
@@ -1534,9 +1554,9 @@ assignments. Such an assignment modifies the value that the pointer
 points to.
 
 ~~~
-let mut owned = box 10;
+let mut owned = box 10i;
 
-let mut value = 20;
+let mut value = 20i;
 let borrowed = &mut value;
 
 *owned = *borrowed + 100;
@@ -1648,33 +1668,26 @@ let string = "foobar";
 let view: &str = string.slice(0, 3);
 ~~~
 
+Square brackets denote indexing into a slice or fixed-size vector:
+
+~~~~
+let crayons: [&str, ..3] = ["BananaMania", "Beaver", "Bittersweet"];
+println!("Crayon 2 is '{}'", crayons[2]);
+~~~~
+
 Mutable slices also exist, just as there are mutable references. However, there
 are no mutable string slices. Strings are a multi-byte encoding (UTF-8) of
 Unicode code points, so they cannot be freely mutated without the ability to
 alter the length.
 
 ~~~
-let mut xs = [1, 2, 3];
+let mut xs = [1i, 2i, 3i];
 let view = xs.mut_slice(0, 2);
 view[0] = 5;
 
 // The type of a mutable slice is written as `&mut [T]`
-let ys: &mut [int] = &mut [1, 2, 3];
+let ys: &mut [int] = &mut [1i, 2i, 3i];
 ~~~
-
-Square brackets denote indexing into a slice or fixed-size vector:
-
-~~~~
-# enum Crayon { Almond, AntiqueBrass, Apricot,
-#               Aquamarine, Asparagus, AtomicTangerine,
-#               BananaMania, Beaver, Bittersweet };
-# fn draw_scene(c: Crayon) { }
-let crayons: [Crayon, ..3] = [BananaMania, Beaver, Bittersweet];
-match crayons[0] {
-    Bittersweet => draw_scene(crayons[0]),
-    _ => ()
-}
-~~~~
 
 A slice or fixed-size vector can be destructured using pattern matching:
 
@@ -1740,6 +1753,8 @@ via dynamic checks and can fail at runtime.
 
 The `Rc` and `Gc` types are not sendable, so they cannot be used to share memory between tasks. Safe
 immutable and mutable shared memory is provided by the `sync::arc` module.
+
+> *Note:* See a [later chapter](#traits) for a discussion about `Send` and sendable types.
 
 # Closures
 
@@ -2428,7 +2443,7 @@ as in this version of `print_all` that copies elements.
 fn print_all<T: Printable + Clone>(printable_things: Vec<T>) {
     let mut i = 0;
     while i < printable_things.len() {
-        let copy_of_thing = printable_things.get(i).clone();
+        let copy_of_thing = printable_things[i].clone();
         copy_of_thing.print();
         i += 1;
     }
@@ -2525,7 +2540,7 @@ of the components of types. By design, trait objects don't know the exact type
 of their contents and so the compiler cannot reason about those properties.
 
 You can instruct the compiler, however, that the contents of a trait object must
-acribe to a particular bound with a trailing colon (`:`). These are examples of
+ascribe to a particular bound with a trailing colon (`:`). These are examples of
 valid types:
 
 ~~~rust
@@ -2580,7 +2595,7 @@ This is a silly way to compute the radius of a circle
 
 In type-parameterized functions,
 methods of the supertrait may be called on values of subtrait-bound type parameters.
-Refering to the previous example of `trait Circle : Shape`:
+Referring to the previous example of `trait Circle : Shape`:
 
 ~~~
 # trait Shape { fn area(&self) -> f64; }
@@ -2612,7 +2627,7 @@ let nonsense = mycircle.radius() * mycircle.area();
 
 ## Deriving implementations for traits
 
-A small number of traits in `std` and `extra` can have implementations
+A small number of traits in can have implementations
 that can be automatically derived. These instances are specified by
 placing the `deriving` attribute on a data type declaration. For
 example, the following will mean that `Circle` has an implementation
@@ -2621,6 +2636,7 @@ of type `ABC` can be randomly generated and converted to a string:
 
 ~~~
 extern crate rand;
+use std::rand::{task_rng, Rng};
 
 #[deriving(PartialEq)]
 struct Circle { radius: f64 }
@@ -2631,6 +2647,13 @@ enum ABC { A, B, C }
 fn main() {
     // Use the Show trait to print "A, B, C."
     println!("{}, {}, {}", A, B, C);
+
+    let mut rng = task_rng();
+
+    // Use the Rand trait to generate a random variants.
+    for _ in range(0i, 10) {
+        println!("{}", rng.gen::<ABC>());
+    }
 }
 ~~~
 
@@ -3039,7 +3062,7 @@ fn main() {
 ~~~{.ignore}
 // `b/mod.rs`
 pub mod c;
-pub fn foo() { println!("Foo!"; }
+pub fn foo() { println!("Foo!"); }
 ~~~
 
 ~~~{.ignore}
@@ -3139,8 +3162,8 @@ In Rust terminology, we need a way to refer to other crates.
 For that, Rust offers you the `extern crate` declaration:
 
 ~~~
+// `num` ships with Rust.
 extern crate num;
-// `num` ships with Rust (much like `extra`; more details further down).
 
 fn main() {
     // The rational number '1/2':

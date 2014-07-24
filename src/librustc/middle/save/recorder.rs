@@ -170,7 +170,7 @@ impl<'a> FmtStrs<'a> {
                 String::from_str(v)
             }
         )));
-        Some(strs.fold(String::new(), |s, ss| s.append(ss.as_slice()))).map(|s| s.into_owned())
+        Some(strs.fold(String::new(), |s, ss| s.append(ss.as_slice())))
     }
 
     pub fn record_without_span(&mut self,
@@ -252,7 +252,7 @@ impl<'a> FmtStrs<'a> {
         // the local case they can be overridden in one block and there is no nice way
         // to refer to such a scope in english, so we just hack it by appending the
         // variable def's node id
-        let qualname = String::from_str(name).append("$").append(id.to_str().as_slice());
+        let qualname = String::from_str(name).append("$").append(id.to_string().as_slice());
         self.check_and_record(Variable,
                               span,
                               sub_span,
@@ -503,7 +503,7 @@ impl<'a> FmtStrs<'a> {
         };
         let (dcn, dck) = match declid {
             Some(declid) => (s!(declid.node), s!(declid.krate)),
-            None => ("".to_owned(), "".to_owned())
+            None => ("".to_string(), "".to_string())
         };
         self.check_and_record(MethodCall,
                               span,

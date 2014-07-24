@@ -66,7 +66,7 @@ use middle::def;
 use middle::ty;
 use middle::typeck;
 use util::nodemap::NodeMap;
-use util::ppaux::{ty_to_str, Repr};
+use util::ppaux::{ty_to_string, Repr};
 
 use syntax::ast::{MutImmutable, MutMutable};
 use syntax::ast;
@@ -106,7 +106,8 @@ pub enum PointerKind {
     OwnedPtr,
     GcPtr,
     BorrowedPtr(ty::BorrowKind, ty::Region),
-    UnsafePtr(ast::Mutability),
+    Implicit(ty::BorrowKind, ty::Region),     // Implicit deref of a borrowed ptr.
+    UnsafePtr(ast::Mutability)
 }
 
 // We use the term "interior" to mean "something reachable from the
@@ -126,7 +127,6 @@ pub enum FieldName {
 #[deriving(Clone, PartialEq, Eq, Hash)]
 pub enum ElementKind {
     VecElement,
-    StrElement,
     OtherElement,
 }
 
@@ -218,7 +218,7 @@ pub fn deref_kind(tcx: &ty::ctxt, t: ty::t) -> deref_kind {
       None => {
         tcx.sess.bug(
             format!("deref_cat() invoked on non-derefable type {}",
-                    ty_to_str(tcx, t)).as_slice());
+                    ty_to_string(tcx, t)).as_slice());
       }
     }
 }
@@ -294,7 +294,7 @@ impl MutabilityCategory {
             OwnedPtr => {
                 base_mutbl.inherit()
             }
-            BorrowedPtr(borrow_kind, _) => {
+            BorrowedPtr(borrow_kind, _) | Implicit(borrow_kind, _) => {
                 MutabilityCategory::from_borrow_kind(borrow_kind)
             }
             GcPtr => {
@@ -384,7 +384,7 @@ impl<'t,TYPER:Typer> MemCategorizationContext<'t,TYPER> {
             Some(adjustment) => {
                 match *adjustment {
                     ty::AutoObject(..) => {
-                        // Implicity cast a concrete object to trait object.
+                        // Implicitly cast a concrete object to trait object.
                         // Result is an rvalue.
                         let expr_ty = if_ok!(self.expr_ty_adjusted(expr));
                         Ok(self.cat_rvalue_node(expr.id(), expr.span(), expr_ty))
@@ -423,7 +423,7 @@ impl<'t,TYPER:Typer> MemCategorizationContext<'t,TYPER> {
                                -> McResult<cmt> {
         let mut cmt = if_ok!(self.cat_expr_unadjusted(expr));
         for deref in range(1u, autoderefs + 1) {
-            cmt = self.cat_deref(expr, cmt, deref);
+            cmt = self.cat_deref(expr, cmt, deref, false);
         }
         return Ok(cmt);
     }
@@ -435,7 +435,7 @@ impl<'t,TYPER:Typer> MemCategorizationContext<'t,TYPER> {
         match expr.node {
           ast::ExprUnary(ast::UnDeref, ref e_base) => {
             let base_cmt = if_ok!(self.cat_expr(&**e_base));
-            Ok(self.cat_deref(expr, base_cmt, 0))
+            Ok(self.cat_deref(expr, base_cmt, 0, false))
           }
 
           ast::ExprField(ref base, f_name, _) => {
@@ -444,12 +444,22 @@ impl<'t,TYPER:Typer> MemCategorizationContext<'t,TYPER> {
           }
 
           ast::ExprIndex(ref base, _) => {
-            if self.typer.is_method_call(expr.id) {
-                return Ok(self.cat_rvalue_node(expr.id(), expr.span(), expr_ty));
+            let method_call = typeck::MethodCall::expr(expr.id());
+            match self.typer.node_method_ty(method_call) {
+                Some(method_ty) => {
+                    // If this is an index implemented by a method call, then it will
+                    // include an implicit deref of the result.
+                    let ret_ty = ty::ty_fn_ret(method_ty);
+                    Ok(self.cat_deref(expr,
+                                      self.cat_rvalue_node(expr.id(),
+                                                           expr.span(),
+                                                           ret_ty), 1, true))
+                }
+                None => {
+                    let base_cmt = if_ok!(self.cat_expr(&**base));
+                    Ok(self.cat_index(expr, base_cmt, 0))
+                }
             }
-
-            let base_cmt = if_ok!(self.cat_expr(&**base));
-            Ok(self.cat_index(expr, base_cmt, 0))
           }
 
           ast::ExprPath(_) => {
@@ -463,7 +473,8 @@ impl<'t,TYPER:Typer> MemCategorizationContext<'t,TYPER> {
 
           ast::ExprAddrOf(..) | ast::ExprCall(..) |
           ast::ExprAssign(..) | ast::ExprAssignOp(..) |
-          ast::ExprFnBlock(..) | ast::ExprProc(..) | ast::ExprRet(..) |
+          ast::ExprFnBlock(..) | ast::ExprProc(..) |
+          ast::ExprUnboxedFn(..) | ast::ExprRet(..) |
           ast::ExprUnary(..) |
           ast::ExprMethodCall(..) | ast::ExprCast(..) | ast::ExprVstore(..) |
           ast::ExprVec(..) | ast::ExprTup(..) | ast::ExprIf(..) |
@@ -567,6 +578,20 @@ impl<'t,TYPER:Typer> MemCategorizationContext<'t,TYPER> {
                               ty:expr_ty
                           }))
                       }
+                  }
+                  ty::ty_unboxed_closure(_) => {
+                      // FIXME #2152 allow mutation of moved upvars
+                      Ok(Rc::new(cmt_ {
+                          id: id,
+                          span: span,
+                          cat: cat_copied_upvar(CopiedUpvar {
+                              upvar_id: var_id,
+                              onceness: ast::Many,
+                              capturing_proc: fn_node_id,
+                          }),
+                          mutbl: McImmutable,
+                          ty: expr_ty
+                      }))
                   }
                   _ => {
                       self.tcx().sess.span_bug(
@@ -692,13 +717,14 @@ impl<'t,TYPER:Typer> MemCategorizationContext<'t,TYPER> {
     }
 
     pub fn cat_deref_obj<N:ast_node>(&self, node: &N, base_cmt: cmt) -> cmt {
-        self.cat_deref_common(node, base_cmt, 0, ty::mk_nil())
+        self.cat_deref_common(node, base_cmt, 0, ty::mk_nil(), false)
     }
 
     fn cat_deref<N:ast_node>(&self,
                              node: &N,
                              base_cmt: cmt,
-                             deref_cnt: uint)
+                             deref_cnt: uint,
+                             implicit: bool)
                              -> cmt {
         let adjustment = match self.typer.adjustments().borrow().find(&node.id()) {
             Some(&ty::AutoObject(..)) => typeck::AutoObject,
@@ -722,7 +748,7 @@ impl<'t,TYPER:Typer> MemCategorizationContext<'t,TYPER> {
             None => base_cmt
         };
         match ty::deref(base_cmt.ty, true) {
-            Some(mt) => self.cat_deref_common(node, base_cmt, deref_cnt, mt.ty),
+            Some(mt) => self.cat_deref_common(node, base_cmt, deref_cnt, mt.ty, implicit),
             None => {
                 self.tcx().sess.span_bug(
                     node.span(),
@@ -736,10 +762,20 @@ impl<'t,TYPER:Typer> MemCategorizationContext<'t,TYPER> {
                                     node: &N,
                                     base_cmt: cmt,
                                     deref_cnt: uint,
-                                    deref_ty: ty::t)
+                                    deref_ty: ty::t,
+                                    implicit: bool)
                                     -> cmt {
         let (m, cat) = match deref_kind(self.tcx(), base_cmt.ty) {
             deref_ptr(ptr) => {
+                let ptr = if implicit {
+                    match ptr {
+                        BorrowedPtr(bk, r) => Implicit(bk, r),
+                        _ => self.tcx().sess.span_bug(node.span(),
+                            "Implicit deref of non-borrowed pointer")
+                    }
+                } else {
+                    ptr
+                };
                 // for unique ptrs, we inherit mutability from the
                 // owning reference.
                 (MutabilityCategory::from_pointer_kind(base_cmt.mutbl, ptr),
@@ -760,7 +796,7 @@ impl<'t,TYPER:Typer> MemCategorizationContext<'t,TYPER> {
 
     pub fn cat_index<N:ast_node>(&self,
                                  elt: &N,
-                                 base_cmt: cmt,
+                                 mut base_cmt: cmt,
                                  derefs: uint)
                                  -> cmt {
         //! Creates a cmt for an indexing operation (`[]`); this
@@ -794,14 +830,26 @@ impl<'t,TYPER:Typer> MemCategorizationContext<'t,TYPER> {
         //! - `derefs`: the deref number to be used for
         //!   the implicit index deref, if any (see above)
 
-        let element_ty = match ty::index(base_cmt.ty) {
-          Some(ref mt) => mt.ty,
-          None => {
-            self.tcx().sess.span_bug(
-                elt.span(),
-                format!("Explicit index of non-index type `{}`",
-                        base_cmt.ty.repr(self.tcx())).as_slice());
-          }
+        let method_call = typeck::MethodCall::expr(elt.id());
+        let method_ty = self.typer.node_method_ty(method_call);
+
+        let element_ty = match method_ty {
+            Some(method_ty) => {
+                let ref_ty = ty::ty_fn_ret(method_ty);
+                base_cmt = self.cat_rvalue_node(elt.id(), elt.span(), ref_ty);
+                *ty::ty_fn_args(method_ty).get(0)
+            }
+            None => {
+                match ty::array_element_ty(base_cmt.ty) {
+                    Some(ref mt) => mt.ty,
+                    None => {
+                        self.tcx().sess.span_bug(
+                            elt.span(),
+                            format!("Explicit index of non-index type `{}`",
+                                    base_cmt.ty.repr(self.tcx())).as_slice());
+                    }
+                }
+            }
         };
 
         return match deref_kind(self.tcx(), base_cmt.ty) {
@@ -973,7 +1021,7 @@ impl<'t,TYPER:Typer> MemCategorizationContext<'t,TYPER> {
         // get the type of the *subpattern* and use that.
 
         debug!("cat_pattern: id={} pat={} cmt={}",
-               pat.id, pprust::pat_to_str(pat),
+               pat.id, pprust::pat_to_string(pat),
                cmt.repr(self.tcx()));
 
         op(self, cmt.clone(), pat);
@@ -1066,7 +1114,7 @@ impl<'t,TYPER:Typer> MemCategorizationContext<'t,TYPER> {
 
           ast::PatBox(ref subpat) | ast::PatRegion(ref subpat) => {
             // @p1, ~p1
-            let subcmt = self.cat_deref(pat, cmt, 0);
+            let subcmt = self.cat_deref(pat, cmt, 0, false);
             if_ok!(self.cat_pattern(subcmt, &**subpat, op));
           }
 
@@ -1098,7 +1146,7 @@ impl<'t,TYPER:Typer> MemCategorizationContext<'t,TYPER> {
         Ok(())
     }
 
-    pub fn cmt_to_str(&self, cmt: &cmt_) -> String {
+    pub fn cmt_to_string(&self, cmt: &cmt_) -> String {
         match cmt.cat {
           cat_static_item => {
               "static item".to_string()
@@ -1122,6 +1170,9 @@ impl<'t,TYPER:Typer> MemCategorizationContext<'t,TYPER> {
                   }
                   _ => {
                       match pk {
+                          Implicit(..) => {
+                            "dereference (dereference is implicit, due to indexing)".to_string()
+                          }
                           OwnedPtr | GcPtr => format!("dereference of `{}`", ptr_sigil(pk)),
                           _ => format!("dereference of `{}`-pointer", ptr_sigil(pk))
                       }
@@ -1137,9 +1188,6 @@ impl<'t,TYPER:Typer> MemCategorizationContext<'t,TYPER> {
           cat_interior(_, InteriorElement(VecElement)) => {
               "vec content".to_string()
           }
-          cat_interior(_, InteriorElement(StrElement)) => {
-              "str content".to_string()
-          }
           cat_interior(_, InteriorElement(OtherElement)) => {
               "indexed content".to_string()
           }
@@ -1147,10 +1195,10 @@ impl<'t,TYPER:Typer> MemCategorizationContext<'t,TYPER> {
               "captured outer variable".to_string()
           }
           cat_discr(ref cmt, _) => {
-            self.cmt_to_str(&**cmt)
+            self.cmt_to_string(&**cmt)
           }
           cat_downcast(ref cmt) => {
-            self.cmt_to_str(&**cmt)
+            self.cmt_to_string(&**cmt)
           }
         }
     }
@@ -1184,6 +1232,7 @@ impl cmt_ {
             cat_deref(_, _, UnsafePtr(..)) |
             cat_deref(_, _, GcPtr(..)) |
             cat_deref(_, _, BorrowedPtr(..)) |
+            cat_deref(_, _, Implicit(..)) |
             cat_upvar(..) => {
                 Rc::new((*self).clone())
             }
@@ -1208,7 +1257,9 @@ impl cmt_ {
 
         match self.cat {
             cat_deref(ref b, _, BorrowedPtr(ty::MutBorrow, _)) |
+            cat_deref(ref b, _, Implicit(ty::MutBorrow, _)) |
             cat_deref(ref b, _, BorrowedPtr(ty::UniqueImmBorrow, _)) |
+            cat_deref(ref b, _, Implicit(ty::UniqueImmBorrow, _)) |
             cat_downcast(ref b) |
             cat_deref(ref b, _, OwnedPtr) |
             cat_interior(ref b, _) |
@@ -1248,7 +1299,8 @@ impl cmt_ {
                 Some(AliasableManaged)
             }
 
-            cat_deref(_, _, BorrowedPtr(ty::ImmBorrow, _)) => {
+            cat_deref(_, _, BorrowedPtr(ty::ImmBorrow, _)) |
+            cat_deref(_, _, Implicit(ty::ImmBorrow, _)) => {
                 Some(AliasableBorrowed)
             }
         }
@@ -1296,9 +1348,12 @@ pub fn ptr_sigil(ptr: PointerKind) -> &'static str {
     match ptr {
         OwnedPtr => "Box",
         GcPtr => "Gc",
-        BorrowedPtr(ty::ImmBorrow, _) => "&",
-        BorrowedPtr(ty::MutBorrow, _) => "&mut",
-        BorrowedPtr(ty::UniqueImmBorrow, _) => "&unique",
+        BorrowedPtr(ty::ImmBorrow, _) |
+        Implicit(ty::ImmBorrow, _) => "&",
+        BorrowedPtr(ty::MutBorrow, _) |
+        Implicit(ty::MutBorrow, _) => "&mut",
+        BorrowedPtr(ty::UniqueImmBorrow, _) |
+        Implicit(ty::UniqueImmBorrow, _) => "&unique",
         UnsafePtr(_) => "*"
     }
 }
@@ -1307,7 +1362,7 @@ impl Repr for InteriorKind {
     fn repr(&self, _tcx: &ty::ctxt) -> String {
         match *self {
             InteriorField(NamedField(fld)) => {
-                token::get_name(fld).get().to_str()
+                token::get_name(fld).get().to_string()
             }
             InteriorField(PositionalField(i)) => format!("#{:?}", i),
             InteriorElement(_) => "[]".to_string(),
@@ -1320,7 +1375,6 @@ fn element_kind(t: ty::t) -> ElementKind {
         ty::ty_rptr(_, ty::mt{ty:ty, ..}) |
         ty::ty_uniq(ty) => match ty::get(ty).sty {
             ty::ty_vec(_, None) => VecElement,
-            ty::ty_str => StrElement,
             _ => OtherElement
         },
         ty::ty_vec(..) => VecElement,

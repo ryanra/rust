@@ -30,7 +30,7 @@ use std::io::fs;
 use std::from_str::FromStr;
 use getopts::{optopt, optflag, reqopt};
 use common::Config;
-use common::{Pretty, DebugInfoGdb, Codegen};
+use common::{Pretty, DebugInfoGdb, DebugInfoLldb, Codegen};
 use util::logv;
 use regex::Regex;
 
@@ -42,7 +42,7 @@ pub mod common;
 pub mod errors;
 
 #[start]
-fn start(argc: int, argv: **u8) -> int {
+fn start(argc: int, argv: *const *const u8) -> int {
     green::start(argc, argv, rustuv::event_loop, main)
 }
 
@@ -89,9 +89,9 @@ pub fn parse_config(args: Vec<String> ) -> Config {
           optflag("h", "help", "show this message"));
 
     assert!(!args.is_empty());
-    let argv0 = (*args.get(0)).clone();
+    let argv0 = args[0].clone();
     let args_ = args.tail();
-    if args.get(1).as_slice() == "-h" || args.get(1).as_slice() == "--help" {
+    if args[1].as_slice() == "-h" || args[1].as_slice() == "--help" {
         let message = format!("Usage: {} [OPTIONS] [TESTNAME...]", argv0);
         println!("{}", getopts::usage(message.as_slice(), groups.as_slice()));
         println!("");
@@ -116,7 +116,7 @@ pub fn parse_config(args: Vec<String> ) -> Config {
     }
 
     let filter = if !matches.free.is_empty() {
-        let s = matches.free.get(0).as_slice();
+        let s = matches.free[0].as_slice();
         match regex::Regex::new(s) {
             Ok(re) => Some(re),
             Err(e) => {
@@ -187,7 +187,7 @@ pub fn log_config(config: &Config) {
                     opt_str(&config.filter
                                    .as_ref()
                                    .map(|re| {
-                                       re.to_str().into_string()
+                                       re.to_string().into_string()
                                    }))));
     logv(c, format!("runtool: {}", opt_str(&config.runtool)));
     logv(c, format!("host-rustcflags: {}",
@@ -239,6 +239,16 @@ pub fn run_tests(config: &Config) {
         //so, we test 1 task at once.
         // also trying to isolate problems with adb_run_wrapper.sh ilooping
         os::setenv("RUST_TEST_TASKS","1");
+    }
+
+    match config.mode {
+        DebugInfoLldb => {
+            // Some older versions of LLDB seem to have problems with multiple
+            // instances running in parallel, so only run one test task at a
+            // time.
+            os::setenv("RUST_TEST_TASKS", "1");
+        }
+        _ => { /* proceed */ }
     }
 
     let opts = test_opts(config);

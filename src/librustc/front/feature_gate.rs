@@ -66,6 +66,9 @@ static KNOWN_FEATURES: &'static [(&'static str, Status)] = &[
 
     ("quad_precision_float", Removed),
 
+    ("rustc_diagnostic_macros", Active),
+    ("unboxed_closures", Active),
+
     // A temporary feature gate used to enable parser extensions needed
     // to bootstrap fix for #5723.
     ("issue_5723_bootstrap", Active),
@@ -93,6 +96,7 @@ pub struct Features {
     pub default_type_params: Cell<bool>,
     pub issue_5723_bootstrap: Cell<bool>,
     pub overloaded_calls: Cell<bool>,
+    pub rustc_diagnostic_macros: Cell<bool>
 }
 
 impl Features {
@@ -101,6 +105,7 @@ impl Features {
             default_type_params: Cell::new(false),
             issue_5723_bootstrap: Cell::new(false),
             overloaded_calls: Cell::new(false),
+            rustc_diagnostic_macros: Cell::new(false)
         }
     }
 }
@@ -323,6 +328,12 @@ impl<'a> Visitor<()> for Context<'a> {
             ast::ExprUnary(ast::UnBox, _) => {
                 self.gate_box(e.span);
             }
+            ast::ExprUnboxedFn(..) => {
+                self.gate_feature("unboxed_closures",
+                                  e.span,
+                                  "unboxed closures are a work-in-progress \
+                                   feature with known bugs");
+            }
             _ => {}
         }
         visit::walk_expr(self, e, ());
@@ -425,4 +436,5 @@ pub fn check_crate(sess: &Session, krate: &ast::Crate) {
     sess.features.default_type_params.set(cx.has_feature("default_type_params"));
     sess.features.issue_5723_bootstrap.set(cx.has_feature("issue_5723_bootstrap"));
     sess.features.overloaded_calls.set(cx.has_feature("overloaded_calls"));
+    sess.features.rustc_diagnostic_macros.set(cx.has_feature("rustc_diagnostic_macros"));
 }

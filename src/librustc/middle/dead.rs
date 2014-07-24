@@ -22,7 +22,7 @@ use util::nodemap::NodeSet;
 use std::collections::HashSet;
 use syntax::ast;
 use syntax::ast_map;
-use syntax::ast_util::{local_def, is_local};
+use syntax::ast_util::{local_def, is_local, PostExpansionMethod};
 use syntax::attr::AttrMetaMethods;
 use syntax::attr;
 use syntax::codemap;
@@ -104,6 +104,7 @@ impl<'a> MarkSymbolVisitor<'a> {
                             None => self.check_def_id(def_id)
                         }
                     }
+                    typeck::MethodStaticUnboxedClosure(_) => {}
                     typeck::MethodParam(typeck::MethodParam {
                         trait_id: trait_id,
                         method_num: index,
@@ -141,16 +142,25 @@ impl<'a> MarkSymbolVisitor<'a> {
     }
 
     fn handle_field_pattern_match(&mut self, lhs: &ast::Pat, pats: &[ast::FieldPat]) {
-        match self.tcx.def_map.borrow().get(&lhs.id) {
-            &def::DefStruct(id) | &def::DefVariant(_, id, _) => {
-                let fields = ty::lookup_struct_fields(self.tcx, id);
-                for pat in pats.iter() {
-                    let field_id = fields.iter()
-                        .find(|field| field.name == pat.ident.name).unwrap().id;
-                    self.live_symbols.insert(field_id.node);
+        let id = match self.tcx.def_map.borrow().get(&lhs.id) {
+            &def::DefVariant(_, id, _) => id,
+            _ => {
+                match ty::ty_to_def_id(ty::node_id_to_type(self.tcx,
+                                                           lhs.id)) {
+                    None => {
+                        self.tcx.sess.span_bug(lhs.span,
+                                               "struct pattern wasn't of a \
+                                                type with a def ID?!")
+                    }
+                    Some(def_id) => def_id,
                 }
             }
-            _ => ()
+        };
+        let fields = ty::lookup_struct_fields(self.tcx, id);
+        for pat in pats.iter() {
+            let field_id = fields.iter()
+                .find(|field| field.name == pat.ident.name).unwrap().id;
+            self.live_symbols.insert(field_id.node);
         }
     }
 
@@ -203,7 +213,7 @@ impl<'a> MarkSymbolVisitor<'a> {
                 visit::walk_trait_method(self, &*trait_method, ctxt);
             }
             ast_map::NodeMethod(method) => {
-                visit::walk_block(self, &*method.body, ctxt);
+                visit::walk_block(self, &*method.pe_body(), ctxt);
             }
             ast_map::NodeForeignItem(foreign_item) => {
                 visit::walk_foreign_item(self, &*foreign_item, ctxt);
@@ -246,6 +256,10 @@ impl<'a> Visitor<MarkSymbolVisitorContext> for MarkSymbolVisitor<'a> {
         match pat.node {
             ast::PatStruct(_, ref fields, _) => {
                 self.handle_field_pattern_match(pat, fields.as_slice());
+            }
+            ast::PatIdent(_, _, _) => {
+                // it might be the only use of a static:
+                self.lookup_and_handle_definition(&pat.id)
             }
             _ => ()
         }
@@ -399,7 +413,7 @@ struct DeadVisitor<'a> {
 impl<'a> DeadVisitor<'a> {
     fn should_warn_about_field(&mut self, node: &ast::StructField_) -> bool {
         let (is_named, has_leading_underscore) = match node.ident() {
-            Some(ref ident) => (true, token::get_ident(*ident).get()[0] == ('_' as u8)),
+            Some(ref ident) => (true, token::get_ident(*ident).get().as_bytes()[0] == ('_' as u8)),
             _ => (false, false)
         };
         let field_type = ty::node_id_to_type(self.tcx, node.id);
@@ -507,7 +521,9 @@ impl<'a> Visitor<()> for DeadVisitor<'a> {
     // Overwrite so that we don't warn the trait method itself.
     fn visit_trait_method(&mut self, trait_method: &ast::TraitMethod, _: ()) {
         match *trait_method {
-            ast::Provided(ref method) => visit::walk_block(self, &*method.body, ()),
+            ast::Provided(ref method) => {
+                visit::walk_block(self, &*method.pe_body(), ())
+            }
             ast::Required(_) => ()
         }
     }

@@ -168,7 +168,7 @@ impl<'a> dot::Labeller<'a, Nd, Ed<'a>> for Graph {
         dot::Id::new(format!("N{}", n))
     }
     fn node_label<'a>(&'a self, n: &Nd) -> dot::LabelText<'a> {
-        dot::LabelStr(str::Slice(self.nodes.get(*n).as_slice()))
+        dot::LabelStr(str::Slice(self.nodes[*n].as_slice()))
     }
     fn edge_label<'a>(&'a self, _: &Ed) -> dot::LabelText<'a> {
         dot::LabelStr(str::Slice("&sube;"))
@@ -225,7 +225,7 @@ impl<'a> dot::Labeller<'a, Nd<'a>, Ed<'a>> for Graph {
     }
     fn node_label<'a>(&'a self, n: &Nd<'a>) -> dot::LabelText<'a> {
         let &(i, _) = n;
-        dot::LabelStr(str::Slice(self.nodes.get(i).as_slice()))
+        dot::LabelStr(str::Slice(self.nodes[i].as_slice()))
     }
     fn edge_label<'a>(&'a self, _: &Ed<'a>) -> dot::LabelText<'a> {
         dot::LabelStr(str::Slice("&sube;"))
@@ -238,8 +238,8 @@ impl<'a> dot::GraphWalk<'a, Nd<'a>, Ed<'a>> for Graph {
     }
     fn edges(&'a self) -> dot::Edges<'a,Ed<'a>> {
         self.edges.iter()
-            .map(|&(i,j)|((i, self.nodes.get(i).as_slice()),
-                          (j, self.nodes.get(j).as_slice())))
+            .map(|&(i,j)|((i, self.nodes[i].as_slice()),
+                          (j, self.nodes[j].as_slice())))
             .collect()
     }
     fn source(&self, e: &Ed<'a>) -> Nd<'a> { let &(s,_) = e; s }
@@ -266,16 +266,14 @@ pub fn main() {
 
 */
 
-#![crate_id = "graphviz#0.11.0"]
+#![crate_name = "graphviz"]
 #![experimental]
 #![crate_type = "rlib"]
 #![crate_type = "dylib"]
 #![license = "MIT/ASL2"]
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
        html_favicon_url = "http://www.rust-lang.org/favicon.ico",
-       html_root_url = "http://doc.rust-lang.org/0.11.0/")]
-
-#![experimental]
+       html_root_url = "http://doc.rust-lang.org/master/")]
 
 use std::io;
 use std::str;
@@ -436,9 +434,36 @@ impl<'a> LabelText<'a> {
     /// Renders text as string suitable for a label in a .dot file.
     pub fn escape(&self) -> String {
         match self {
-            &LabelStr(ref s) => s.as_slice().escape_default().to_string(),
-            &EscStr(ref s) => LabelText::escape_str(s.as_slice()).to_string(),
+            &LabelStr(ref s) => s.as_slice().escape_default(),
+            &EscStr(ref s) => LabelText::escape_str(s.as_slice()),
         }
+    }
+
+    /// Decomposes content into string suitable for making EscStr that
+    /// yields same content as self.  The result obeys the law
+    /// render(`lt`) == render(`EscStr(lt.pre_escaped_content())`) for
+    /// all `lt: LabelText`.
+    fn pre_escaped_content(self) -> str::MaybeOwned<'a> {
+        match self {
+            EscStr(s) => s,
+            LabelStr(s) => if s.as_slice().contains_char('\\') {
+                str::Owned(s.as_slice().escape_default())
+            } else {
+                s
+            },
+        }
+    }
+
+    /// Puts `prefix` on a line above this label, with a blank line separator.
+    pub fn prefix_line(self, prefix: LabelText) -> LabelText<'static> {
+        prefix.suffix_line(self)
+    }
+
+    /// Puts `suffix` on a line below this label, with a blank line separator.
+    pub fn suffix_line(self, suffix: LabelText) -> LabelText<'static> {
+        let prefix = self.pre_escaped_content().into_string();
+        let suffix = suffix.pre_escaped_content();
+        EscStr(str::Owned(prefix.append(r"\n\n").append(suffix.as_slice())))
     }
 }
 
@@ -666,10 +691,7 @@ mod tests {
         let mut writer = MemWriter::new();
         render(&g, &mut writer).unwrap();
         let mut r = BufReader::new(writer.get_ref());
-        match r.read_to_str() {
-            Ok(string) => Ok(string.to_string()),
-            Err(err) => Err(err),
-        }
+        r.read_to_string()
     }
 
     // All of the tests use raw-strings as the format for the expected outputs,
@@ -768,7 +790,7 @@ r#"digraph hasse_diagram {
 
         render(&g, &mut writer).unwrap();
         let mut r = BufReader::new(writer.get_ref());
-        let r = r.read_to_str();
+        let r = r.read_to_string();
 
         assert_eq!(r.unwrap().as_slice(),
 r#"digraph syntax_tree {

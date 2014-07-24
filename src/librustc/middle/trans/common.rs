@@ -13,10 +13,9 @@
 //! Code that is useful in various trans modules.
 
 use driver::session::Session;
-use lib::llvm::{ValueRef, BasicBlockRef, BuilderRef};
-use lib::llvm::{True, False, Bool};
-use lib::llvm::llvm;
-use lib;
+use llvm;
+use llvm::{ValueRef, BasicBlockRef, BuilderRef};
+use llvm::{True, False, Bool};
 use middle::def;
 use middle::lang_items::LangItem;
 use middle::subst;
@@ -72,7 +71,8 @@ pub fn type_is_immediate(ccx: &CrateContext, ty: ty::t) -> bool {
     }
     match ty::get(ty).sty {
         ty::ty_bot => true,
-        ty::ty_struct(..) | ty::ty_enum(..) | ty::ty_tup(..) => {
+        ty::ty_struct(..) | ty::ty_enum(..) | ty::ty_tup(..) |
+        ty::ty_unboxed_closure(..) => {
             let llty = sizing_type_of(ccx, ty);
             llsize_of_alloc(ccx, llty) <= llsize_of_alloc(ccx, ccx.int_type)
         }
@@ -196,13 +196,13 @@ impl param_substs {
     }
 }
 
-fn param_substs_to_str(this: &param_substs, tcx: &ty::ctxt) -> String {
+fn param_substs_to_string(this: &param_substs, tcx: &ty::ctxt) -> String {
     format!("param_substs({})", this.substs.repr(tcx))
 }
 
 impl Repr for param_substs {
     fn repr(&self, tcx: &ty::ctxt) -> String {
-        param_substs_to_str(self, tcx)
+        param_substs_to_string(self, tcx)
     }
 }
 
@@ -238,8 +238,6 @@ pub struct FunctionContext<'a> {
     // parameter to the function. After function construction, this should
     // always be Some.
     pub llretptr: Cell<Option<ValueRef>>,
-
-    pub entry_bcx: RefCell<Option<&'a Block<'a>>>,
 
     // These pub elements: "hoisted basic blocks" containing
     // administrative activities that have to happen in only one place in
@@ -322,8 +320,6 @@ impl<'a> FunctionContext<'a> {
                                                      .get()
                                                      .unwrap());
         }
-        // Remove the cycle between fcx and bcx, so memory can be freed
-        *self.entry_bcx.borrow_mut() = None;
     }
 
     pub fn get_llreturn(&self) -> BasicBlockRef {
@@ -440,11 +436,11 @@ impl<'a> Block<'a> {
         token::get_ident(ident).get().to_string()
     }
 
-    pub fn node_id_to_str(&self, id: ast::NodeId) -> String {
-        self.tcx().map.node_to_str(id).to_string()
+    pub fn node_id_to_string(&self, id: ast::NodeId) -> String {
+        self.tcx().map.node_to_string(id).to_string()
     }
 
-    pub fn expr_to_str(&self, e: &ast::Expr) -> String {
+    pub fn expr_to_string(&self, e: &ast::Expr) -> String {
         e.repr(self.tcx())
     }
 
@@ -458,20 +454,20 @@ impl<'a> Block<'a> {
         }
     }
 
-    pub fn val_to_str(&self, val: ValueRef) -> String {
-        self.ccx().tn.val_to_str(val)
+    pub fn val_to_string(&self, val: ValueRef) -> String {
+        self.ccx().tn.val_to_string(val)
     }
 
     pub fn llty_str(&self, ty: Type) -> String {
-        self.ccx().tn.type_to_str(ty)
+        self.ccx().tn.type_to_string(ty)
     }
 
-    pub fn ty_to_str(&self, t: ty::t) -> String {
+    pub fn ty_to_string(&self, t: ty::t) -> String {
         t.repr(self.tcx())
     }
 
     pub fn to_str(&self) -> String {
-        let blk: *Block = self;
+        let blk: *const Block = self;
         format!("[block {}]", blk)
     }
 }
@@ -526,10 +522,6 @@ pub fn C_nil(ccx: &CrateContext) -> ValueRef {
 }
 
 pub fn C_bool(ccx: &CrateContext, val: bool) -> ValueRef {
-    C_integral(Type::bool(ccx), val as u64, false)
-}
-
-pub fn C_i1(ccx: &CrateContext, val: bool) -> ValueRef {
     C_integral(Type::i1(ccx), val as u64, false)
 }
 
@@ -568,7 +560,7 @@ pub fn C_cstr(cx: &CrateContext, s: InternedString, null_terminated: bool) -> Va
         }
 
         let sc = llvm::LLVMConstStringInContext(cx.llcx,
-                                                s.get().as_ptr() as *c_char,
+                                                s.get().as_ptr() as *const c_char,
                                                 s.get().len() as c_uint,
                                                 !null_terminated as Bool);
 
@@ -578,7 +570,7 @@ pub fn C_cstr(cx: &CrateContext, s: InternedString, null_terminated: bool) -> Va
         });
         llvm::LLVMSetInitializer(g, sc);
         llvm::LLVMSetGlobalConstant(g, True);
-        lib::llvm::SetLinkage(g, lib::llvm::InternalLinkage);
+        llvm::SetLinkage(g, llvm::InternalLinkage);
 
         cx.const_cstr_cache.borrow_mut().insert(s, g);
         g
@@ -607,7 +599,7 @@ pub fn C_binary_slice(cx: &CrateContext, data: &[u8]) -> ValueRef {
         });
         llvm::LLVMSetInitializer(g, lldata);
         llvm::LLVMSetGlobalConstant(g, True);
-        lib::llvm::SetLinkage(g, lib::llvm::InternalLinkage);
+        llvm::SetLinkage(g, llvm::InternalLinkage);
 
         let cs = llvm::LLVMConstPointerCast(g, Type::i8p(cx).to_ref());
         C_struct(cx, [cs, C_uint(cx, len)], false)
@@ -636,14 +628,8 @@ pub fn C_array(ty: Type, elts: &[ValueRef]) -> ValueRef {
 
 pub fn C_bytes(ccx: &CrateContext, bytes: &[u8]) -> ValueRef {
     unsafe {
-        let ptr = bytes.as_ptr() as *c_char;
+        let ptr = bytes.as_ptr() as *const c_char;
         return llvm::LLVMConstStringInContext(ccx.llcx, ptr, bytes.len() as c_uint, True);
-    }
-}
-
-pub fn get_param(fndecl: ValueRef, param: uint) -> ValueRef {
-    unsafe {
-        llvm::LLVMGetParam(fndecl, param as c_uint)
     }
 }
 
@@ -653,7 +639,7 @@ pub fn const_get_elt(cx: &CrateContext, v: ValueRef, us: &[c_uint])
         let r = llvm::LLVMConstExtractValue(v, us.as_ptr(), us.len() as c_uint);
 
         debug!("const_get_elt(v={}, us={:?}, r={})",
-               cx.tn.val_to_str(v), us, cx.tn.val_to_str(r));
+               cx.tn.val_to_string(v), us, cx.tn.val_to_string(r));
 
         return r;
     }
@@ -800,6 +786,9 @@ pub fn resolve_vtable_under_param_substs(tcx: &ty::ctxt,
         }
         typeck::vtable_param(n_param, n_bound) => {
             find_vtable(tcx, param_substs, n_param, n_bound)
+        }
+        typeck::vtable_unboxed_closure(def_id) => {
+            typeck::vtable_unboxed_closure(def_id)
         }
         typeck::vtable_error => typeck::vtable_error
     }

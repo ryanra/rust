@@ -1,4 +1,4 @@
-.TH RUSTC "1" "March 2014" "rustc 0.11.0" "User Commands"
+.TH RUSTC "1" "March 2014" "rustc 0.12.0-pre" "User Commands"
 .SH NAME
 rustc \- The Rust compiler
 .SH SYNOPSIS
@@ -11,6 +11,9 @@ This program is a compiler for the Rust language, available at
 
 .SH OPTIONS
 
+.TP
+\fB\-\-crate-name NAME\fR
+Specify the name of the crate being built
 .TP
 \fB\-\-crate-type=[bin|lib|dylib|rlib|staticlib]\fR
 Configure the flavor of rust crate that is generated (default `bin`)
@@ -60,11 +63,12 @@ Parse only; do not compile, assemble, or link
 \fB\-\-pretty\fR [TYPE]
 Pretty-print the input instead of compiling; valid types are: normal
 (un-annotated source), expanded (crates expanded), typed (crates
-expanded, with type annotations), or identified (fully parenthesized,
-AST nodes and blocks with IDs)
+expanded, with type annotations), identified (fully parenthesized,
+AST nodes and blocks with IDs), or flowgraph=<nodeid> (graphviz
+formatted flowgraph for node)
 .TP
 \fB\-\-dep-info\fR [FILENAME]
-Output dependency info to <filename> after compiling, in o format suitable
+Output dependency info to <filename> after compiling, in a format suitable
 for use by Makefiles.
 .TP
 \fB\-\-sysroot\fR PATH
@@ -138,8 +142,8 @@ A space-separated list of arguments to pass through to LLVM.
 If specified, the compiler will save more files (.bc, .o, .no-opt.bc) generated
 throughout compilation in the output directory.
 .TP
-\fBno-rpath\fR
-If specified, then the rpath value for dynamic libraries will not be set in
+\fBrpath\fR
+If specified, then the rpath value for dynamic libraries will be set in
 either dynamic library or executable outputs.
 .TP
 \fBno-prepopulate-passes\fR

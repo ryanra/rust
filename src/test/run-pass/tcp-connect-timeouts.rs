@@ -24,7 +24,7 @@ extern crate green;
 extern crate rustuv;
 
 #[cfg(test)] #[start]
-fn start(argc: int, argv: **u8) -> int {
+fn start(argc: int, argv: *const *const u8) -> int {
     green::start(argc, argv, rustuv::event_loop, __test::main)
 }
 
@@ -54,7 +54,7 @@ macro_rules! iotest (
 iotest!(fn eventual_timeout() {
     use native;
     let addr = next_test_ip4();
-    let host = addr.ip.to_str();
+    let host = addr.ip.to_string();
     let port = addr.port;
 
     // Use a native task to receive connections because it turns out libuv is
@@ -82,7 +82,7 @@ iotest!(fn eventual_timeout() {
 
 iotest!(fn timeout_success() {
     let addr = next_test_ip4();
-    let host = addr.ip.to_str();
+    let host = addr.ip.to_string();
     let port = addr.port;
     let _l = TcpListener::bind(host.as_slice(), port).unwrap().listen();
 

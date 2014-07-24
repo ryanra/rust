@@ -8,11 +8,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use back::archive::ArchiveRO;
-use back::link;
+use super::link;
 use driver::session;
 use driver::config;
-use lib::llvm::{ModuleRef, TargetMachineRef, llvm, True, False};
+use llvm;
+use llvm::archive_ro::ArchiveRO;
+use llvm::{ModuleRef, TargetMachineRef, True, False};
 use metadata::cstore;
 use util::common::time;
 
@@ -53,17 +54,19 @@ pub fn run(sess: &session::Session, llmod: ModuleRef,
         };
 
         let archive = ArchiveRO::open(&path).expect("wanted an rlib");
-        debug!("reading {}", name);
+        let file = path.filename_str().unwrap();
+        let file = file.slice(3, file.len() - 5); // chop off lib/.rlib
+        debug!("reading {}", file);
         let bc = time(sess.time_passes(),
                       format!("read {}.bytecode.deflate", name).as_slice(),
                       (),
                       |_| {
                           archive.read(format!("{}.bytecode.deflate",
-                                               name).as_slice())
+                                               file).as_slice())
                       });
         let bc = bc.expect("missing compressed bytecode in archive!");
         let bc = time(sess.time_passes(),
-                      format!("inflate {}.bc", name).as_slice(),
+                      format!("inflate {}.bc", file).as_slice(),
                       (),
                       |_| {
                           match flate::inflate_bytes(bc) {
@@ -82,7 +85,7 @@ pub fn run(sess: &session::Session, llmod: ModuleRef,
              (),
              |()| unsafe {
             if !llvm::LLVMRustLinkInExternalBitcode(llmod,
-                                                    ptr as *libc::c_char,
+                                                    ptr as *const libc::c_char,
                                                     bc.len() as libc::size_t) {
                 link::llvm_err(sess,
                                format!("failed to load bc of `{}`",
@@ -94,10 +97,11 @@ pub fn run(sess: &session::Session, llmod: ModuleRef,
     // Internalize everything but the reachable symbols of the current module
     let cstrs: Vec<::std::c_str::CString> =
         reachable.iter().map(|s| s.as_slice().to_c_str()).collect();
-    let arr: Vec<*i8> = cstrs.iter().map(|c| c.with_ref(|p| p)).collect();
+    let arr: Vec<*const i8> = cstrs.iter().map(|c| c.as_ptr()).collect();
     let ptr = arr.as_ptr();
     unsafe {
-        llvm::LLVMRustRunRestrictionPass(llmod, ptr as **libc::c_char,
+        llvm::LLVMRustRunRestrictionPass(llmod,
+                                         ptr as *const *const libc::c_char,
                                          arr.len() as libc::size_t);
     }
 

@@ -72,6 +72,7 @@ pub fn load_plugins(sess: &Session, krate: &ast::Crate) -> Plugins {
     loader.plugins
 }
 
+// note that macros aren't expanded yet, and therefore macros can't add plugins.
 impl<'a> Visitor<()> for PluginLoader<'a> {
     fn visit_view_item(&mut self, vi: &ast::ViewItem, _: ()) {
         match vi.node {
@@ -109,6 +110,10 @@ impl<'a> Visitor<()> for PluginLoader<'a> {
             _ => (),
         }
     }
+    fn visit_mac(&mut self, _: &ast::Mac, _:()) {
+        // bummer... can't see plugins inside macros.
+        // do nothing.
+    }
 }
 
 impl<'a> PluginLoader<'a> {
@@ -129,7 +134,7 @@ impl<'a> PluginLoader<'a> {
             let registrar =
                 match lib.symbol(symbol.as_slice()) {
                     Ok(registrar) => {
-                        mem::transmute::<*u8,PluginRegistrarFun>(registrar)
+                        mem::transmute::<*mut u8,PluginRegistrarFun>(registrar)
                     }
                     // again fatal if we can't register macros
                     Err(err) => self.sess.span_fatal(vi.span, err.as_slice())

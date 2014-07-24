@@ -89,11 +89,12 @@
 #if defined(__linux__) || defined(__FreeBSD__)
 	.hidden MORESTACK
 #else
+/* For some reason, as is seeing this too ...
 #if defined(__APPLE__)
 	.private_extern MORESTACK
 #endif
 #endif
-
+*/
 #ifdef __ELF__
 	.type MORESTACK,@function
 #endif

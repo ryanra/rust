@@ -86,6 +86,6 @@ src/etc/dl
 .settings/
 /build
 i686-pc-mingw32/
-src/librustc/lib/llvmdeps.rs
+src/librustc_llvm/llvmdeps.rs
 *.pot
 .kateproject

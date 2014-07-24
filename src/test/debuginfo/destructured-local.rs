@@ -11,6 +11,9 @@
 // ignore-android: FIXME(#10381)
 
 // compile-flags:-g
+
+// === GDB TESTS ===================================================================================
+
 // gdb-command:rbreak zzz
 // gdb-command:run
 // gdb-command:finish
@@ -125,6 +128,122 @@
 // gdb-command:print *nn
 // gdb-check:$43 = 56
 
+
+// === LLDB TESTS ==================================================================================
+
+// lldb-command:run
+
+// lldb-command:print a
+// lldb-check:[...]$0 = 1
+// lldb-command:print b
+// lldb-check:[...]$1 = false
+
+// lldb-command:print c
+// lldb-check:[...]$2 = 2
+// lldb-command:print d
+// lldb-check:[...]$3 = 3
+// lldb-command:print e
+// lldb-check:[...]$4 = 4
+
+// lldb-command:print f
+// lldb-check:[...]$5 = 5
+// lldb-command:print g
+// lldb-check:[...]$6 = (6, 7)
+
+// lldb-command:print h
+// lldb-check:[...]$7 = 8
+// lldb-command:print i
+// lldb-check:[...]$8 = Struct { a: 9, b: 10 }
+// lldb-command:print j
+// lldb-check:[...]$9 = 11
+
+// lldb-command:print k
+// lldb-check:[...]$10 = 12
+// lldb-command:print l
+// lldb-check:[...]$11 = 13
+
+// lldb-command:print m
+// lldb-check:[...]$12 = 14
+// lldb-command:print n
+// lldb-check:[...]$13 = 16
+
+// lldb-command:print o
+// lldb-check:[...]$14 = 18
+
+// lldb-command:print p
+// lldb-check:[...]$15 = 19
+// lldb-command:print q
+// lldb-check:[...]$16 = 20
+// lldb-command:print r
+// lldb-check:[...]$17 = Struct { a: 21, b: 22 }
+
+// lldb-command:print s
+// lldb-check:[...]$18 = 24
+// lldb-command:print t
+// lldb-check:[...]$19 = 23
+
+// lldb-command:print u
+// lldb-check:[...]$20 = 25
+// lldb-command:print v
+// lldb-check:[...]$21 = 26
+// lldb-command:print w
+// lldb-check:[...]$22 = 27
+// lldb-command:print x
+// lldb-check:[...]$23 = 28
+// lldb-command:print y
+// lldb-check:[...]$24 = 29
+// lldb-command:print z
+// lldb-check:[...]$25 = 30
+// lldb-command:print ae
+// lldb-check:[...]$26 = 31
+// lldb-command:print oe
+// lldb-check:[...]$27 = 32
+// lldb-command:print ue
+// lldb-check:[...]$28 = 33
+
+// lldb-command:print aa
+// lldb-check:[...]$29 = (34, 35)
+
+// lldb-command:print bb
+// lldb-check:[...]$30 = (36, 37)
+
+// lldb-command:print cc
+// lldb-check:[...]$31 = 38
+
+// lldb-command:print dd
+// lldb-check:[...]$32 = (40, 41, 42)
+
+// lldb-command:print *ee
+// lldb-check:[...]$33 = (43, 44, 45)
+
+// lldb-command:print *ff
+// lldb-check:[...]$34 = 46
+
+// lldb-command:print gg
+// lldb-check:[...]$35 = (47, 48)
+
+// lldb-command:print *hh
+// lldb-check:[...]$36 = 50
+
+// lldb-command:print ii
+// lldb-check:[...]$37 = 51
+
+// lldb-command:print *jj
+// lldb-check:[...]$38 = 52
+
+// lldb-command:print kk
+// lldb-check:[...]$39 = 53
+
+// lldb-command:print ll
+// lldb-check:[...]$40 = 54
+
+// lldb-command:print mm
+// lldb-check:[...]$41 = 55
+
+// lldb-command:print *nn
+// lldb-check:[...]$42 = 56
+
+
 #![allow(unused_variable)]
 
 struct Struct {
@@ -156,7 +275,7 @@ fn main() {
     let Struct { a: k, b: l } = Struct { a: 12, b: 13 };
 
     // ignored tuple element
-    let (m, _, n) = (14, 15, 16);
+    let (m, _, n) = (14i, 15i, 16i);
 
     // ignored struct field
     let Struct { b: o, .. } = Struct { a: 17, b: 18 };
@@ -169,25 +288,25 @@ fn main() {
 
     // complex nesting
     let ((u, v), ((w, (x, Struct { a: y, b: z})), Struct { a: ae, b: oe }), ue) =
-        ((25, 26), ((27, (28, Struct { a: 29, b: 30})), Struct { a: 31, b: 32 }), 33);
+        ((25i, 26i), ((27i, (28i, Struct { a: 29, b: 30})), Struct { a: 31, b: 32 }), 33i);
 
     // reference
-    let &aa = &(34, 35);
+    let &aa = &(34i, 35i);
 
     // reference
-    let &bb = &(36, 37);
+    let &bb = &(36i, 37i);
 
     // contained reference
-    let (&cc, _) = (&38, 39);
+    let (&cc, _) = (&38i, 39i);
 
     // unique pointer
-    let box dd = box() (40, 41, 42);
+    let box dd = box() (40i, 41i, 42i);
 
     // ref binding
-    let ref ee = (43, 44, 45);
+    let ref ee = (43i, 44i, 45i);
 
     // ref binding in tuple
-    let (ref ff, gg) = (46, (47, 48));
+    let (ref ff, gg) = (46i, (47i, 48i));
 
     // ref binding in struct
     let Struct { b: ref hh, .. } = Struct { a: 49, b: 50 };
@@ -204,7 +323,7 @@ fn main() {
     // tuple struct with ref binding
     let &TupleStruct(mm, ref nn) = &TupleStruct(55.0, 56);
 
-    zzz();
+    zzz(); // #break
 }
 
-fn zzz() {()}
+fn zzz() { () }

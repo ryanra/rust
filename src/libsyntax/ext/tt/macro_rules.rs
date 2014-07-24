@@ -13,7 +13,7 @@ use ast::{TTDelim};
 use ast;
 use codemap::{Span, Spanned, DUMMY_SP};
 use ext::base::{ExtCtxt, MacResult, MacroDef};
-use ext::base::{NormalTT, MacroExpander};
+use ext::base::{NormalTT, TTMacroExpander};
 use ext::base;
 use ext::tt::macro_parser::{Success, Error, Failure};
 use ext::tt::macro_parser::{NamedMatch, MatchedSeq, MatchedNonterminal};
@@ -38,7 +38,7 @@ struct ParserAnyMacro<'a> {
 impl<'a> ParserAnyMacro<'a> {
     /// Make sure we don't have any tokens left to parse, so we don't
     /// silently drop anything. `allow_semi` is so that "optional"
-    /// semilons at the end of normal expressions aren't complained
+    /// semicolons at the end of normal expressions aren't complained
     /// about e.g. the semicolon in `macro_rules! kapow( () => {
     /// fail!(); } )` doesn't get picked up by .parse_expr(), but it's
     /// allowed to be there.
@@ -48,7 +48,7 @@ impl<'a> ParserAnyMacro<'a> {
             parser.bump()
         }
         if parser.token != EOF {
-            let token_str = parser.this_token_to_str();
+            let token_str = parser.this_token_to_string();
             let msg = format!("macro expansion ignores token `{}` and any \
                                following",
                               token_str);
@@ -73,6 +73,9 @@ impl<'a> MacResult for ParserAnyMacro<'a> {
         let mut ret = SmallVector::zero();
         loop {
             let mut parser = self.parser.borrow_mut();
+            // so... do outer attributes attached to the macro invocation
+            // just disappear? This question applies to make_methods, as
+            // well.
             match parser.parse_item_with_outer_attributes() {
                 Some(item) => ret.push(item),
                 None => break
@@ -81,6 +84,20 @@ impl<'a> MacResult for ParserAnyMacro<'a> {
         self.ensure_complete_parse(false);
         Some(ret)
     }
+
+    fn make_methods(&self) -> Option<SmallVector<Gc<ast::Method>>> {
+        let mut ret = SmallVector::zero();
+        loop {
+            let mut parser = self.parser.borrow_mut();
+            match parser.token {
+                EOF => break,
+                _ => ret.push(parser.parse_method(None))
+            }
+        }
+        self.ensure_complete_parse(false);
+        Some(ret)
+    }
+
     fn make_stmt(&self) -> Option<Gc<ast::Stmt>> {
         let attrs = self.parser.borrow_mut().parse_outer_attributes();
         let ret = self.parser.borrow_mut().parse_stmt(attrs);
@@ -95,7 +112,7 @@ struct MacroRulesMacroExpander {
     rhses: Vec<Rc<NamedMatch>>,
 }
 
-impl MacroExpander for MacroRulesMacroExpander {
+impl TTMacroExpander for MacroRulesMacroExpander {
     fn expand(&self,
               cx: &mut ExtCtxt,
               sp: Span,
@@ -119,7 +136,7 @@ impl MacResult for MacroRulesDefiner {
     }
 }
 
-// Given `lhses` and `rhses`, this is the new macro we create
+/// Given `lhses` and `rhses`, this is the new macro we create
 fn generic_extension(cx: &ExtCtxt,
                      sp: Span,
                      name: Ident,
@@ -131,7 +148,7 @@ fn generic_extension(cx: &ExtCtxt,
         println!("{}! {} {} {}",
                  token::get_ident(name),
                  "{",
-                 print::pprust::tt_to_str(&TTDelim(Rc::new(arg.iter()
+                 print::pprust::tt_to_string(&TTDelim(Rc::new(arg.iter()
                                                               .map(|x| (*x).clone())
                                                               .collect()))),
                  "}");
@@ -193,9 +210,9 @@ fn generic_extension(cx: &ExtCtxt,
     cx.span_fatal(best_fail_spot, best_fail_msg.as_slice());
 }
 
-// this procedure performs the expansion of the
-// macro_rules! macro. It parses the RHS and adds
-// an extension to the current context.
+/// This procedure performs the expansion of the
+/// macro_rules! macro. It parses the RHS and adds
+/// an extension to the current context.
 pub fn add_new_extension(cx: &mut ExtCtxt,
                          sp: Span,
                          name: Ident,
@@ -254,7 +271,7 @@ pub fn add_new_extension(cx: &mut ExtCtxt,
 
     box MacroRulesDefiner {
         def: RefCell::new(Some(MacroDef {
-            name: token::get_ident(name).to_str(),
+            name: token::get_ident(name).to_string(),
             ext: NormalTT(exp, Some(sp))
         }))
     } as Box<MacResult>

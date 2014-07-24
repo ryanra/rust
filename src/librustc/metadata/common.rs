@@ -11,7 +11,6 @@
 #![allow(non_camel_case_types)]
 
 use std::mem;
-use syntax::crateid::CrateId;
 use back::svh::Svh;
 
 // EBML enum definitions and utils shared by the encoder and decoder
@@ -71,9 +70,9 @@ pub static tag_crate_deps: uint = 0x18;
 pub static tag_crate_dep: uint = 0x19;
 
 pub static tag_crate_hash: uint = 0x1a;
-pub static tag_crate_crateid: uint = 0x1b;
+pub static tag_crate_crate_name: uint = 0x1b;
 
-pub static tag_crate_dep_crateid: uint = 0x1d;
+pub static tag_crate_dep_crate_name: uint = 0x1d;
 pub static tag_crate_dep_hash: uint = 0x1e;
 
 pub static tag_mod_impl: uint = 0x1f;
@@ -139,10 +138,11 @@ pub enum astencode_tag { // Reserves 0x40 -- 0x5f
     tag_table_vtable_map = 0x50,
     tag_table_adjustments = 0x51,
     tag_table_moves_map = 0x52,
-    tag_table_capture_map = 0x53
+    tag_table_capture_map = 0x53,
+    tag_table_unboxed_closure_type = 0x54,
 }
 static first_astencode_tag: uint = tag_ast as uint;
-static last_astencode_tag: uint = tag_table_capture_map as uint;
+static last_astencode_tag: uint = tag_table_unboxed_closure_type as uint;
 impl astencode_tag {
     pub fn from_uint(value : uint) -> Option<astencode_tag> {
         let is_a_tag = first_astencode_tag <= value && value <= last_astencode_tag;
@@ -155,6 +155,10 @@ impl astencode_tag {
 pub static tag_item_trait_method_sort: uint = 0x60;
 
 pub static tag_item_impl_type_basename: uint = 0x61;
+
+pub static tag_crate_triple: uint = 0x66;
+
+pub static tag_dylib_dependency_formats: uint = 0x67;
 
 // Language items are a top-level directory (for speed). Hierarchy:
 //
@@ -200,10 +204,6 @@ pub static tag_plugin_registrar_fn: uint = 0x8b;
 pub static tag_exported_macros: uint = 0x8c;
 pub static tag_macro_def: uint = 0x8d;
 
-pub static tag_crate_triple: uint = 0x66;
-
-pub static tag_dylib_dependency_formats: uint = 0x67;
-
 pub static tag_method_argument_names: uint = 0x8e;
 pub static tag_method_argument_name: uint = 0x8f;
 
@@ -212,10 +212,9 @@ pub static tag_reachable_extern_fn_id: uint = 0x91;
 
 pub static tag_items_data_item_stability: uint = 0x92;
 
-
 #[deriving(Clone, Show)]
 pub struct LinkMeta {
-    pub crateid: CrateId,
+    pub crate_name: String,
     pub crate_hash: Svh,
 }
 
@@ -224,3 +223,7 @@ pub static tag_region_param_def_ident: uint = 0x91;
 pub static tag_region_param_def_def_id: uint = 0x92;
 pub static tag_region_param_def_space: uint = 0x93;
 pub static tag_region_param_def_index: uint = 0x94;
+
+pub static tag_unboxed_closures: uint = 0x95;
+pub static tag_unboxed_closure: uint = 0x96;
+pub static tag_unboxed_closure_type: uint = 0x97;

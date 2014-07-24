@@ -51,25 +51,30 @@
 
 TARGET_CRATES := libc std green rustuv native flate arena glob term semver \
                  uuid serialize sync getopts collections num test time rand \
-                 url log regex graphviz core rlibc alloc debug rustrt
-HOST_CRATES := syntax rustc rustdoc fourcc hexfloat regex_macros fmt_macros
+                 url log regex graphviz core rlibc alloc debug rustrt \
+                 unicode
+HOST_CRATES := syntax rustc rustdoc fourcc hexfloat regex_macros fmt_macros \
+	       rustc_llvm rustc_back
 CRATES := $(TARGET_CRATES) $(HOST_CRATES)
 TOOLS := compiletest rustdoc rustc
 
 DEPS_core :=
 DEPS_rlibc :=
+DEPS_unicode := core
 DEPS_alloc := core libc native:jemalloc
 DEPS_debug := std
 DEPS_rustrt := alloc core libc collections native:rustrt_native
-DEPS_std := core libc rand alloc collections rustrt sync \
+DEPS_std := core libc rand alloc collections rustrt sync unicode \
 	native:rust_builtin native:backtrace
 DEPS_graphviz := std
 DEPS_green := std native:context_switch
 DEPS_rustuv := std native:uv native:uv_support
 DEPS_native := std
 DEPS_syntax := std term serialize log fmt_macros debug
-DEPS_rustc := syntax native:rustllvm flate arena serialize getopts \
-              time log graphviz debug
+DEPS_rustc := syntax flate arena serialize getopts \
+              time log graphviz debug rustc_llvm rustc_back
+DEPS_rustc_llvm := native:rustllvm libc std
+DEPS_rustc_back := std syntax rustc_llvm flate log libc
 DEPS_rustdoc := rustc native:hoedown serialize getopts \
                 test time debug
 DEPS_flate := std native:miniz
@@ -82,7 +87,7 @@ DEPS_semver := std
 DEPS_uuid := std serialize
 DEPS_sync := core alloc rustrt collections
 DEPS_getopts := std
-DEPS_collections := core alloc
+DEPS_collections := core alloc unicode
 DEPS_fourcc := rustc syntax std
 DEPS_hexfloat := rustc syntax std
 DEPS_num := std
@@ -108,6 +113,7 @@ ONLY_RLIB_rlibc := 1
 ONLY_RLIB_alloc := 1
 ONLY_RLIB_rand := 1
 ONLY_RLIB_collections := 1
+ONLY_RLIB_unicode := 1
 
 ################################################################################
 # You should not need to edit below this line

@@ -66,9 +66,9 @@ pub fn gather_move_from_pat(bccx: &BorrowckCtxt,
                             move_pat: &ast::Pat,
                             cmt: mc::cmt) {
     let pat_span_path_opt = match move_pat.node {
-        ast::PatIdent(_, ref path, _) => {
-            Some(MoveSpanAndPath::with_span_and_path(move_pat.span,
-                                                     (*path).clone()))
+        ast::PatIdent(_, ref path1, _) => {
+            Some(MoveSpanAndPath{span: move_pat.span,
+                                 ident: path1.node})
         },
         _ => None,
     };
@@ -131,6 +131,7 @@ fn check_and_get_illegal_move_origin(bccx: &BorrowckCtxt,
                                      cmt: &mc::cmt) -> Option<mc::cmt> {
     match cmt.cat {
         mc::cat_deref(_, _, mc::BorrowedPtr(..)) |
+        mc::cat_deref(_, _, mc::Implicit(..)) |
         mc::cat_deref(_, _, mc::GcPtr) |
         mc::cat_deref(_, _, mc::UnsafePtr(..)) |
         mc::cat_upvar(..) | mc::cat_static_item |

@@ -13,6 +13,9 @@
 #![feature(managed_boxes)]
 
 // compile-flags:-g
+
+// === GDB TESTS ===================================================================================
+
 // gdb-command:rbreak zzz
 // gdb-command:run
 // gdb-command:finish
@@ -29,6 +32,24 @@
 // gdb-command:print *unique_val_ref
 // gdb-check:$4 = {-17, -22}
 
+
+// === LLDB TESTS ==================================================================================
+
+// lldb-command:run
+
+// lldb-command:print *stack_val_ref
+// lldb-check:[...]$0 = (-14, -19)
+
+// lldb-command:print *ref_to_unnamed
+// lldb-check:[...]$1 = (-15, -20)
+
+// lldb-command:print *managed_val_ref
+// lldb-check:[...]$2 = (-16, -21)
+
+// lldb-command:print *unique_val_ref
+// lldb-check:[...]$3 = (-17, -22)
+
+
 #![allow(unused_variable)]
 
 use std::gc::{Gc, GC};
@@ -39,12 +60,12 @@ fn main() {
     let ref_to_unnamed: &(i16, f32) = &(-15, -20f32);
 
     let managed_val: Gc<(i16, f32)> = box(GC) (-16, -21f32);
-    let managed_val_ref: &(i16, f32) = managed_val;
+    let managed_val_ref: &(i16, f32) = &*managed_val;
 
     let unique_val: Box<(i16, f32)> = box() (-17, -22f32);
-    let unique_val_ref: &(i16, f32) = unique_val;
+    let unique_val_ref: &(i16, f32) = &*unique_val;
 
-    zzz();
+    zzz(); // #break
 }
 
 fn zzz() {()}

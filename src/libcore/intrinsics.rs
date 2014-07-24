@@ -44,14 +44,9 @@ A quick refresher on memory ordering:
 #![experimental]
 #![allow(missing_doc)]
 
-// This is needed to prevent duplicate lang item definitions.
-#[cfg(test)]
-pub use realcore::intrinsics::{TyDesc, Opaque, TyVisitor, TypeId};
-
-pub type GlueFn = extern "Rust" fn(*i8);
+pub type GlueFn = extern "Rust" fn(*const i8);
 
 #[lang="ty_desc"]
-#[cfg(not(test))]
 pub struct TyDesc {
     // sizeof(T)
     pub size: uint,
@@ -70,13 +65,11 @@ pub struct TyDesc {
 }
 
 #[lang="opaque"]
-#[cfg(not(test))]
 pub enum Opaque { }
 
 pub type Disr = u64;
 
 #[lang="ty_visitor"]
-#[cfg(not(test))]
 pub trait TyVisitor {
     fn visit_bot(&mut self) -> bool;
     fn visit_nil(&mut self) -> bool;
@@ -102,55 +95,58 @@ pub trait TyVisitor {
     fn visit_estr_slice(&mut self) -> bool;
     fn visit_estr_fixed(&mut self, n: uint, sz: uint, align: uint) -> bool;
 
-    fn visit_box(&mut self, mtbl: uint, inner: *TyDesc) -> bool;
-    fn visit_uniq(&mut self, mtbl: uint, inner: *TyDesc) -> bool;
-    fn visit_ptr(&mut self, mtbl: uint, inner: *TyDesc) -> bool;
-    fn visit_rptr(&mut self, mtbl: uint, inner: *TyDesc) -> bool;
+    fn visit_box(&mut self, mtbl: uint, inner: *const TyDesc) -> bool;
+    fn visit_uniq(&mut self, mtbl: uint, inner: *const TyDesc) -> bool;
+    fn visit_ptr(&mut self, mtbl: uint, inner: *const TyDesc) -> bool;
+    fn visit_rptr(&mut self, mtbl: uint, inner: *const TyDesc) -> bool;
 
-    fn visit_evec_slice(&mut self, mtbl: uint, inner: *TyDesc) -> bool;
+    fn visit_evec_slice(&mut self, mtbl: uint, inner: *const TyDesc) -> bool;
     fn visit_evec_fixed(&mut self, n: uint, sz: uint, align: uint,
-                        mtbl: uint, inner: *TyDesc) -> bool;
+                        mtbl: uint, inner: *const TyDesc) -> bool;
 
     fn visit_enter_rec(&mut self, n_fields: uint,
                        sz: uint, align: uint) -> bool;
     fn visit_rec_field(&mut self, i: uint, name: &str,
-                       mtbl: uint, inner: *TyDesc) -> bool;
+                       mtbl: uint, inner: *const TyDesc) -> bool;
     fn visit_leave_rec(&mut self, n_fields: uint,
                        sz: uint, align: uint) -> bool;
 
     fn visit_enter_class(&mut self, name: &str, named_fields: bool, n_fields: uint,
                          sz: uint, align: uint) -> bool;
     fn visit_class_field(&mut self, i: uint, name: &str, named: bool,
-                         mtbl: uint, inner: *TyDesc) -> bool;
+                         mtbl: uint, inner: *const TyDesc) -> bool;
     fn visit_leave_class(&mut self, name: &str, named_fields: bool, n_fields: uint,
                          sz: uint, align: uint) -> bool;
 
     fn visit_enter_tup(&mut self, n_fields: uint,
                        sz: uint, align: uint) -> bool;
-    fn visit_tup_field(&mut self, i: uint, inner: *TyDesc) -> bool;
+    fn visit_tup_field(&mut self, i: uint, inner: *const TyDesc) -> bool;
     fn visit_leave_tup(&mut self, n_fields: uint,
                        sz: uint, align: uint) -> bool;
 
     fn visit_enter_enum(&mut self, n_variants: uint,
-                        get_disr: unsafe extern fn(ptr: *Opaque) -> Disr,
+                        get_disr: unsafe extern fn(ptr: *const Opaque) -> Disr,
                         sz: uint, align: uint) -> bool;
     fn visit_enter_enum_variant(&mut self, variant: uint,
                                 disr_val: Disr,
                                 n_fields: uint,
                                 name: &str) -> bool;
-    fn visit_enum_variant_field(&mut self, i: uint, offset: uint, inner: *TyDesc) -> bool;
+    fn visit_enum_variant_field(&mut self, i: uint, offset: uint,
+                                inner: *const TyDesc) -> bool;
     fn visit_leave_enum_variant(&mut self, variant: uint,
                                 disr_val: Disr,
                                 n_fields: uint,
                                 name: &str) -> bool;
     fn visit_leave_enum(&mut self, n_variants: uint,
-                        get_disr: unsafe extern fn(ptr: *Opaque) -> Disr,
+                        get_disr: unsafe extern fn(ptr: *const Opaque) -> Disr,
                         sz: uint, align: uint) -> bool;
 
     fn visit_enter_fn(&mut self, purity: uint, proto: uint,
                       n_inputs: uint, retstyle: uint) -> bool;
-    fn visit_fn_input(&mut self, i: uint, mode: uint, inner: *TyDesc) -> bool;
-    fn visit_fn_output(&mut self, retstyle: uint, variadic: bool, inner: *TyDesc) -> bool;
+    fn visit_fn_input(&mut self, i: uint, mode: uint,
+                      inner: *const TyDesc) -> bool;
+    fn visit_fn_output(&mut self, retstyle: uint, variadic: bool,
+                       inner: *const TyDesc) -> bool;
     fn visit_leave_fn(&mut self, purity: uint, proto: uint,
                       n_inputs: uint, retstyle: uint) -> bool;
 
@@ -170,9 +166,9 @@ extern "rust-intrinsic" {
     pub fn atomic_cxchg_acqrel<T>(dst: *mut T, old: T, src: T) -> T;
     pub fn atomic_cxchg_relaxed<T>(dst: *mut T, old: T, src: T) -> T;
 
-    pub fn atomic_load<T>(src: *T) -> T;
-    pub fn atomic_load_acq<T>(src: *T) -> T;
-    pub fn atomic_load_relaxed<T>(src: *T) -> T;
+    pub fn atomic_load<T>(src: *const T) -> T;
+    pub fn atomic_load_acq<T>(src: *const T) -> T;
+    pub fn atomic_load_relaxed<T>(src: *const T) -> T;
 
     pub fn atomic_store<T>(dst: *mut T, val: T);
     pub fn atomic_store_rel<T>(dst: *mut T, val: T);
@@ -276,7 +272,7 @@ extern "rust-intrinsic" {
     pub fn pref_align_of<T>() -> uint;
 
     /// Get a static pointer to a type descriptor.
-    pub fn get_tydesc<T>() -> *TyDesc;
+    pub fn get_tydesc<T>() -> *const TyDesc;
 
     /// Gets an identifier which is globally unique to the specified type. This
     /// function will return the same value for a type regardless of whichever
@@ -320,7 +316,7 @@ extern "rust-intrinsic" {
     /// Returns `true` if a type is managed (will be allocated on the local heap)
     pub fn owns_managed<T>() -> bool;
 
-    pub fn visit_tydesc(td: *TyDesc, tv: &mut TyVisitor);
+    pub fn visit_tydesc(td: *const TyDesc, tv: &mut TyVisitor);
 
     /// Calculates the offset from a pointer. The offset *must* be in-bounds of
     /// the object, or one-byte-past-the-end. An arithmetic overflow is also
@@ -328,21 +324,75 @@ extern "rust-intrinsic" {
     ///
     /// This is implemented as an intrinsic to avoid converting to and from an
     /// integer, since the conversion would throw away aliasing information.
-    pub fn offset<T>(dst: *T, offset: int) -> *T;
+    pub fn offset<T>(dst: *const T, offset: int) -> *const T;
 
-    /// Equivalent to the appropriate `llvm.memcpy.p0i8.0i8.*` intrinsic, with
-    /// a size of `count` * `size_of::<T>()` and an alignment of
-    /// `min_align_of::<T>()`
-    pub fn copy_nonoverlapping_memory<T>(dst: *mut T, src: *T, count: uint);
+    /// Copies data from one location to another.
+    ///
+    /// Copies `count` elements (not bytes) from `src` to `dst`. The source
+    /// and destination may *not* overlap.
+    ///
+    /// `copy_nonoverlapping_memory` is semantically equivalent to C's `memcpy`.
+    ///
+    /// # Example
+    ///
+    /// A safe swap function:
+    ///
+    /// ```
+    /// use std::mem;
+    /// use std::ptr;
+    ///
+    /// fn swap<T>(x: &mut T, y: &mut T) {
+    ///     unsafe {
+    ///         // Give ourselves some scratch space to work with
+    ///         let mut t: T = mem::uninitialized();
+    ///
+    ///         // Perform the swap, `&mut` pointers never alias
+    ///         ptr::copy_nonoverlapping_memory(&mut t, &*x, 1);
+    ///         ptr::copy_nonoverlapping_memory(x, &*y, 1);
+    ///         ptr::copy_nonoverlapping_memory(y, &t, 1);
+    ///
+    ///         // y and t now point to the same thing, but we need to completely forget `tmp`
+    ///         // because it's no longer relevant.
+    ///         mem::forget(t);
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// # Safety Note
+    ///
+    /// If the source and destination overlap then the behavior of this
+    /// function is undefined.
+    #[unstable]
+    pub fn copy_nonoverlapping_memory<T>(dst: *mut T, src: *const T, count: uint);
 
-    /// Equivalent to the appropriate `llvm.memmove.p0i8.0i8.*` intrinsic, with
-    /// a size of `count` * `size_of::<T>()` and an alignment of
-    /// `min_align_of::<T>()`
-    pub fn copy_memory<T>(dst: *mut T, src: *T, count: uint);
+    /// Copies data from one location to another.
+    ///
+    /// Copies `count` elements (not bytes) from `src` to `dst`. The source
+    /// and destination may overlap.
+    ///
+    /// `copy_memory` is semantically equivalent to C's `memmove`.
+    ///
+    /// # Example
+    ///
+    /// Efficiently create a Rust vector from an unsafe buffer:
+    ///
+    /// ```
+    /// use std::ptr;
+    ///
+    /// unsafe fn from_buf_raw<T>(ptr: *const T, elts: uint) -> Vec<T> {
+    ///     let mut dst = Vec::with_capacity(elts);
+    ///     dst.set_len(elts);
+    ///     ptr::copy_memory(dst.as_mut_ptr(), ptr, elts);
+    ///     dst
+    /// }
+    /// ```
+    ///
+    #[unstable]
+    pub fn copy_memory<T>(dst: *mut T, src: *const T, count: uint);
 
-    /// Equivalent to the appropriate `llvm.memset.p0i8.*` intrinsic, with a
-    /// size of `count` * `size_of::<T>()` and an alignment of
-    /// `min_align_of::<T>()`
+    /// Invokes memset on the specified pointer, setting `count * size_of::<T>()`
+    /// bytes of memory starting at `dst` to `c`.
+    #[experimental = "uncertain about naming and semantics"]
     pub fn set_memory<T>(dst: *mut T, val: u8, count: uint);
 
     /// Equivalent to the appropriate `llvm.memcpy.p0i8.0i8.*` intrinsic, with
@@ -350,13 +400,14 @@ extern "rust-intrinsic" {
     /// `min_align_of::<T>()`
     ///
     /// The volatile parameter parameter is set to `true`, so it will not be optimized out.
-    pub fn volatile_copy_nonoverlapping_memory<T>(dst: *mut T, src: *T, count: uint);
+    pub fn volatile_copy_nonoverlapping_memory<T>(dst: *mut T, src: *const T,
+                                                  count: uint);
     /// Equivalent to the appropriate `llvm.memmove.p0i8.0i8.*` intrinsic, with
     /// a size of `count` * `size_of::<T>()` and an alignment of
     /// `min_align_of::<T>()`
     ///
     /// The volatile parameter parameter is set to `true`, so it will not be optimized out.
-    pub fn volatile_copy_memory<T>(dst: *mut T, src: *T, count: uint);
+    pub fn volatile_copy_memory<T>(dst: *mut T, src: *const T, count: uint);
     /// Equivalent to the appropriate `llvm.memset.p0i8.*` intrinsic, with a
     /// size of `count` * `size_of::<T>()` and an alignment of
     /// `min_align_of::<T>()`.
@@ -365,7 +416,7 @@ extern "rust-intrinsic" {
     pub fn volatile_set_memory<T>(dst: *mut T, val: u8, count: uint);
 
     /// Perform a volatile load from the `src` pointer.
-    pub fn volatile_load<T>(src: *T) -> T;
+    pub fn volatile_load<T>(src: *const T) -> T;
     /// Perform a volatile store to the `dst` pointer.
     pub fn volatile_store<T>(dst: *mut T, val: T);
 
@@ -560,12 +611,10 @@ extern "rust-intrinsic" {
 #[lang="type_id"] // This needs to be kept in lockstep with the code in trans/intrinsic.rs and
                   // middle/lang_items.rs
 #[deriving(PartialEq, Eq, Show)]
-#[cfg(not(test))]
 pub struct TypeId {
     t: u64,
 }
 
-#[cfg(not(test))]
 impl TypeId {
     /// Returns the `TypeId` of the type this generic function has been instantiated with
     pub fn of<T: 'static>() -> TypeId {

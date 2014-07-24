@@ -317,6 +317,12 @@ impl<'a> Context<'a> {
         &self.tcx.sess
     }
 
+    /// Get the level of `lint` at the current position of the lint
+    /// traversal.
+    pub fn current_level(&self, lint: &'static Lint) -> Level {
+        self.lints.levels.find(&LintId::of(lint)).map_or(Allow, |&(lvl, _)| lvl)
+    }
+
     fn lookup_and_emit(&self, lint: &'static Lint, span: Option<Span>, msg: &str) {
         let (level, src) = match self.lints.levels.find(&LintId::of(lint)) {
             None => return,
@@ -666,7 +672,7 @@ pub fn check_crate(tcx: &ty::ctxt,
         for &(lint, span, ref msg) in v.iter() {
             tcx.sess.span_bug(span,
                               format!("unprocessed lint {} at {}: {}",
-                                      lint.as_str(), tcx.map.node_to_str(*id), *msg).as_slice())
+                                      lint.as_str(), tcx.map.node_to_string(*id), *msg).as_slice())
         }
     }
 

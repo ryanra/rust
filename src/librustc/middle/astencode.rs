@@ -28,9 +28,10 @@ use middle::subst;
 use middle::subst::VecPerParamSpace;
 use middle::typeck::{MethodCall, MethodCallee, MethodOrigin};
 use middle::{ty, typeck};
-use util::ppaux::ty_to_str;
+use util::ppaux::ty_to_string;
 
 use syntax::{ast, ast_map, ast_util, codemap, fold};
+use syntax::ast_util::PostExpansionMethod;
 use syntax::codemap::Span;
 use syntax::fold::Folder;
 use syntax::parse::token;
@@ -86,7 +87,7 @@ pub fn encode_inlined_item(ecx: &e::EncodeContext,
         e::IIMethodRef(_, _, m) => m.id,
     };
     debug!("> Encoding inlined item: {} ({})",
-           ecx.tcx.map.path_to_str(id),
+           ecx.tcx.map.path_to_string(id),
            ebml_w.writer.tell());
 
     let ii = simplify_ast(ii);
@@ -99,7 +100,7 @@ pub fn encode_inlined_item(ecx: &e::EncodeContext,
     ebml_w.end_tag();
 
     debug!("< Encoded inlined fn: {} ({})",
-           ecx.tcx.map.path_to_str(id),
+           ecx.tcx.map.path_to_string(id),
            ebml_w.writer.tell());
 }
 
@@ -119,7 +120,7 @@ pub fn decode_inlined_item(cdata: &cstore::crate_metadata,
         debug!("> Decoding inlined fn: {}::?",
         {
             // Do an Option dance to use the path after it is moved below.
-            let s = ast_map::path_to_str(ast_map::Values(path.iter()));
+            let s = ast_map::path_to_string(ast_map::Values(path.iter()));
             path_as_str = Some(s);
             path_as_str.as_ref().map(|x| x.as_slice())
         });
@@ -136,7 +137,7 @@ pub fn decode_inlined_item(cdata: &cstore::crate_metadata,
         let ident = match ii {
             ast::IIItem(i) => i.ident,
             ast::IIForeign(i) => i.ident,
-            ast::IIMethod(_, _, m) => m.ident,
+            ast::IIMethod(_, _, m) => m.pe_ident(),
         };
         debug!("Fn named: {}", token::get_ident(ident));
         debug!("< Decoded inlined fn: {}::{}",
@@ -147,7 +148,7 @@ pub fn decode_inlined_item(cdata: &cstore::crate_metadata,
         match ii {
           ast::IIItem(i) => {
             debug!(">>> DECODED ITEM >>>\n{}\n<<< DECODED ITEM <<<",
-                   syntax::print::pprust::item_to_str(&*i));
+                   syntax::print::pprust::item_to_string(&*i));
           }
           _ => { }
         }
@@ -345,7 +346,9 @@ fn simplify_ast(ii: e::InlinedItemRef) -> ast::InlinedItem {
         // HACK we're not dropping items.
         e::IIItemRef(i) => ast::IIItem(fold::noop_fold_item(i, &mut fld)
                                        .expect_one("expected one item")),
-        e::IIMethodRef(d, p, m) => ast::IIMethod(d, p, fold::noop_fold_method(m, &mut fld)),
+        e::IIMethodRef(d, p, m) => ast::IIMethod(d, p, fold::noop_fold_method(m, &mut fld)
+                                                 .expect_one(
+                "noop_fold_method must produce exactly one method")),
         e::IIForeignRef(i) => ast::IIForeign(fold::noop_fold_foreign_item(i, &mut fld))
     }
 }
@@ -387,7 +390,8 @@ fn renumber_and_map_ast(xcx: &ExtendedDecodeContext,
                 ast::IIItem(fld.fold_item(i).expect_one("expected one item"))
             }
             ast::IIMethod(d, is_provided, m) => {
-                ast::IIMethod(xcx.tr_def_id(d), is_provided, fld.fold_method(m))
+                ast::IIMethod(xcx.tr_def_id(d), is_provided, fld.fold_method(m)
+                              .expect_one("expected one method"))
             }
             ast::IIForeign(i) => ast::IIForeign(fld.fold_foreign_item(i))
         }
@@ -605,6 +609,9 @@ impl tr for MethodOrigin {
     fn tr(&self, xcx: &ExtendedDecodeContext) -> MethodOrigin {
         match *self {
             typeck::MethodStatic(did) => typeck::MethodStatic(did.tr(xcx)),
+            typeck::MethodStaticUnboxedClosure(did) => {
+                typeck::MethodStaticUnboxedClosure(did.tr(xcx))
+            }
             typeck::MethodParam(ref mp) => {
                 typeck::MethodParam(
                     typeck::MethodParam {
@@ -692,8 +699,18 @@ pub fn encode_vtable_origin(ecx: &e::EncodeContext,
                 })
             })
           }
+          typeck::vtable_unboxed_closure(def_id) => {
+              ebml_w.emit_enum_variant("vtable_unboxed_closure",
+                                       2u,
+                                       1u,
+                                       |ebml_w| {
+                ebml_w.emit_enum_variant_arg(0u, |ebml_w| {
+                    Ok(ebml_w.emit_def_id(def_id))
+                })
+              })
+          }
           typeck::vtable_error => {
-            ebml_w.emit_enum_variant("vtable_error", 2u, 3u, |_ebml_w| {
+            ebml_w.emit_enum_variant("vtable_error", 3u, 3u, |_ebml_w| {
                 Ok(())
             })
           }
@@ -767,7 +784,8 @@ impl<'a> vtable_decoder_helpers for reader::Decoder<'a> {
         self.read_enum("vtable_origin", |this| {
             this.read_enum_variant(["vtable_static",
                                     "vtable_param",
-                                    "vtable_error"],
+                                    "vtable_error",
+                                    "vtable_unboxed_closure"],
                                    |this, i| {
                 Ok(match i {
                   0 => {
@@ -794,6 +812,13 @@ impl<'a> vtable_decoder_helpers for reader::Decoder<'a> {
                     )
                   }
                   2 => {
+                    typeck::vtable_unboxed_closure(
+                        this.read_enum_variant_arg(0u, |this| {
+                            Ok(this.read_def_id_noxcx(cdata))
+                        }).unwrap()
+                    )
+                  }
+                  3 => {
                     typeck::vtable_error
                   }
                   _ => fail!("bad enum variant")
@@ -810,7 +835,7 @@ fn encode_vec_per_param_space<T>(ebml_w: &mut Encoder,
                                  v: &subst::VecPerParamSpace<T>,
                                  f: |&mut Encoder, &T|) {
     for &space in subst::ParamSpace::all().iter() {
-        ebml_w.emit_from_vec(v.get_vec(space).as_slice(),
+        ebml_w.emit_from_vec(v.get_slice(space),
                              |ebml_w, n| Ok(f(ebml_w, n))).unwrap();
     }
 }
@@ -826,7 +851,7 @@ impl<'a> get_ty_str_ctxt for e::EncodeContext<'a> {
     fn ty_str_ctxt<'a>(&'a self) -> tyencode::ctxt<'a> {
         tyencode::ctxt {
             diag: self.tcx.sess.diagnostic(),
-            ds: e::def_to_str,
+            ds: e::def_to_string,
             tcx: self.tcx,
             abbrevs: &self.type_abbrevs
         }
@@ -834,6 +859,9 @@ impl<'a> get_ty_str_ctxt for e::EncodeContext<'a> {
 }
 
 trait ebml_writer_helpers {
+    fn emit_closure_type(&mut self,
+                         ecx: &e::EncodeContext,
+                         closure_type: &ty::ClosureTy);
     fn emit_ty(&mut self, ecx: &e::EncodeContext, ty: ty::t);
     fn emit_tys(&mut self, ecx: &e::EncodeContext, tys: &[ty::t]);
     fn emit_type_param_def(&mut self,
@@ -847,6 +875,14 @@ trait ebml_writer_helpers {
 }
 
 impl<'a> ebml_writer_helpers for Encoder<'a> {
+    fn emit_closure_type(&mut self,
+                         ecx: &e::EncodeContext,
+                         closure_type: &ty::ClosureTy) {
+        self.emit_opaque(|this| {
+            Ok(e::write_closure_type(ecx, this, closure_type))
+        });
+    }
+
     fn emit_ty(&mut self, ecx: &e::EncodeContext, ty: ty::t) {
         self.emit_opaque(|this| Ok(e::write_type(ecx, this, ty)));
     }
@@ -943,7 +979,7 @@ impl<'a> write_tag_and_id for Encoder<'a> {
 }
 
 struct SideTableEncodingIdVisitor<'a,'b> {
-    ecx_ptr: *libc::c_void,
+    ecx_ptr: *const libc::c_void,
     new_ebml_w: &'a mut Encoder<'b>,
 }
 
@@ -1123,6 +1159,18 @@ fn encode_side_tables_for_id(ecx: &e::EncodeContext,
             })
         })
     }
+
+    for unboxed_closure_type in tcx.unboxed_closure_types
+                                   .borrow()
+                                   .find(&ast_util::local_def(id))
+                                   .iter() {
+        ebml_w.tag(c::tag_table_unboxed_closure_type, |ebml_w| {
+            ebml_w.id(id);
+            ebml_w.tag(c::tag_table_val, |ebml_w| {
+                ebml_w.emit_closure_type(ecx, *unboxed_closure_type)
+            })
+        })
+    }
 }
 
 trait doc_decoder_helpers {
@@ -1146,6 +1194,8 @@ trait ebml_decoder_decoder_helpers {
                      -> ty::Polytype;
     fn read_substs(&mut self, xcx: &ExtendedDecodeContext) -> subst::Substs;
     fn read_auto_adjustment(&mut self, xcx: &ExtendedDecodeContext) -> ty::AutoAdjustment;
+    fn read_unboxed_closure_type(&mut self, xcx: &ExtendedDecodeContext)
+                                 -> ty::ClosureTy;
     fn convert_def_id(&mut self,
                       xcx: &ExtendedDecodeContext,
                       source: DefIdSource,
@@ -1318,6 +1368,18 @@ impl<'a> ebml_decoder_decoder_helpers for reader::Decoder<'a> {
         }).unwrap()
     }
 
+    fn read_unboxed_closure_type(&mut self, xcx: &ExtendedDecodeContext)
+                                 -> ty::ClosureTy {
+        self.read_opaque(|this, doc| {
+            Ok(tydecode::parse_ty_closure_data(
+                doc.data,
+                xcx.dcx.cdata.cnum,
+                doc.start,
+                xcx.dcx.tcx,
+                |s, a| this.convert_def_id(xcx, s, a)))
+        }).unwrap()
+    }
+
     fn convert_def_id(&mut self,
                       xcx: &ExtendedDecodeContext,
                       source: tydecode::DefIdSource,
@@ -1391,7 +1453,7 @@ fn decode_side_tables(xcx: &ExtendedDecodeContext,
                     c::tag_table_node_type => {
                         let ty = val_dsr.read_ty(xcx);
                         debug!("inserting ty for node {:?}: {}",
-                               id, ty_to_str(dcx.tcx, ty));
+                               id, ty_to_string(dcx.tcx, ty));
                         dcx.tcx.node_types.borrow_mut().insert(id as uint, ty);
                     }
                     c::tag_table_item_subst => {
@@ -1437,6 +1499,15 @@ fn decode_side_tables(xcx: &ExtendedDecodeContext,
                     c::tag_table_adjustments => {
                         let adj: ty::AutoAdjustment = val_dsr.read_auto_adjustment(xcx);
                         dcx.tcx.adjustments.borrow_mut().insert(id, adj);
+                    }
+                    c::tag_table_unboxed_closure_type => {
+                        let unboxed_closure_type =
+                            val_dsr.read_unboxed_closure_type(xcx);
+                        dcx.tcx
+                           .unboxed_closure_types
+                           .borrow_mut()
+                           .insert(ast_util::local_def(id),
+                                   unboxed_closure_type);
                     }
                     _ => {
                         xcx.dcx.tcx.sess.bug(
@@ -1523,7 +1594,7 @@ fn test_basic() {
         fn foo() {}
     ));
 }
-
+/* NOTE: When there's a snapshot, update this (yay quasiquoter!)
 #[test]
 fn test_smalltalk() {
     let cx = mk_ctxt();
@@ -1531,6 +1602,7 @@ fn test_smalltalk() {
         fn foo() -> int { 3 + 4 } // first smalltalk program ever executed.
     ));
 }
+*/
 
 #[test]
 fn test_more() {
@@ -1552,7 +1624,7 @@ fn test_simplification() {
             return alist {eq_fn: eq_int, data: Vec::new()};
         }
     ).unwrap();
-    let item_in = e::IIItemRef(item);
+    let item_in = e::IIItemRef(&*item);
     let item_out = simplify_ast(item_in);
     let item_exp = ast::IIItem(quote_item!(cx,
         fn new_int_alist<B>() -> alist<int, B> {
@@ -1561,7 +1633,8 @@ fn test_simplification() {
     ).unwrap());
     match (item_out, item_exp) {
       (ast::IIItem(item_out), ast::IIItem(item_exp)) => {
-        assert!(pprust::item_to_str(item_out) == pprust::item_to_str(item_exp));
+        assert!(pprust::item_to_string(&*item_out) ==
+                pprust::item_to_string(&*item_exp));
       }
       _ => fail!()
     }

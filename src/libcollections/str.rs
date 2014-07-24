@@ -55,10 +55,10 @@ other languages.
 
 # Representation
 
-Rust's string type, `str`, is a sequence of unicode codepoints encoded as a
-stream of UTF-8 bytes. All safely-created strings are guaranteed to be validly
-encoded UTF-8 sequences. Additionally, strings are not null-terminated
-and can contain null codepoints.
+Rust's string type, `str`, is a sequence of unicode scalar values encoded as a
+stream of UTF-8 bytes. All strings are guaranteed to be validly encoded UTF-8
+sequences. Additionally, strings are not null-terminated and can contain null
+bytes.
 
 The actual representation of strings have direct mappings to vectors: `&str`
 is the same as `&[u8]`.
@@ -69,7 +69,6 @@ is the same as `&[u8]`.
 
 use core::prelude::*;
 
-use core::char;
 use core::default::Default;
 use core::fmt;
 use core::cmp;
@@ -79,46 +78,43 @@ use core::mem;
 use Collection;
 use hash;
 use string::String;
+use unicode;
 use vec::Vec;
 
 pub use core::str::{from_utf8, CharEq, Chars, CharOffsets};
 pub use core::str::{Bytes, CharSplits};
-pub use core::str::{CharSplitsN, Words, AnyLines, MatchIndices, StrSplits};
+pub use core::str::{CharSplitsN, AnyLines, MatchIndices, StrSplits};
 pub use core::str::{eq_slice, is_utf8, is_utf16, Utf16Items};
 pub use core::str::{Utf16Item, ScalarValue, LoneSurrogate, utf16_items};
 pub use core::str::{truncate_utf16_at_nul, utf8_char_width, CharRange};
 pub use core::str::{Str, StrSlice};
+pub use unicode::str::{UnicodeStrSlice, Words, Graphemes, GraphemeIndices};
 
 /*
 Section: Creating a string
 */
 
-/// Consumes a vector of bytes to create a new utf-8 string.
-///
-/// Returns `Err` with the original vector if the vector contains invalid
-/// UTF-8.
+/// Deprecated. Replaced by `String::from_utf8`
+#[deprecated = "Replaced by `String::from_utf8`"]
 pub fn from_utf8_owned(vv: Vec<u8>) -> Result<String, Vec<u8>> {
     String::from_utf8(vv)
 }
 
-/// Convert a byte to a UTF-8 string
-///
-/// # Failure
-///
-/// Fails if invalid UTF-8
+/// Deprecated. Replaced by `String::from_byte`
+#[deprecated = "Replaced by String::from_byte"]
 pub fn from_byte(b: u8) -> String {
     assert!(b < 128u8);
     String::from_char(1, b as char)
 }
 
-/// Convert a char to a string
+/// Deprecated. Use `String::from_char` or `char::to_string()` instead
+#[deprecated = "use String::from_char or char.to_string()"]
 pub fn from_char(ch: char) -> String {
-    let mut buf = String::new();
-    buf.push_char(ch);
-    buf
+    String::from_char(1, ch)
 }
 
-/// Convert a vector of chars to a string
+/// Deprecated. Replaced by `String::from_chars`
+#[deprecated = "use String::from_chars instead"]
 pub fn from_chars(chs: &[char]) -> String {
     chs.iter().map(|c| *c).collect()
 }
@@ -126,9 +122,27 @@ pub fn from_chars(chs: &[char]) -> String {
 /// Methods for vectors of strings
 pub trait StrVector {
     /// Concatenate a vector of strings.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// let first = "Restaurant at the End of the".to_string();
+    /// let second = " Universe".to_string();
+    /// let string_vec = vec![first, second];
+    /// assert_eq!(string_vec.concat(), "Restaurant at the End of the Universe".to_string());
+    /// ```
     fn concat(&self) -> String;
 
     /// Concatenate a vector of strings, placing a given separator between each.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// let first = "Roast".to_string();
+    /// let second = "Sirloin Steak".to_string();
+    /// let string_vec = vec![first, second];
+    /// assert_eq!(string_vec.connect(", "), "Roast, Sirloin Steak".to_string());
+    /// ```
     fn connect(&self, sep: &str) -> String;
 }
 
@@ -138,7 +152,7 @@ impl<'a, S: Str> StrVector for &'a [S] {
             return String::new();
         }
 
-        // `len` calculation may overflow but push_str but will check boundaries
+        // `len` calculation may overflow but push_str will check boundaries
         let len = self.iter().map(|s| s.as_slice().len()).sum();
 
         let mut result = String::with_capacity(len);
@@ -231,8 +245,6 @@ pub struct Decompositions<'a> {
 impl<'a> Iterator<char> for Decompositions<'a> {
     #[inline]
     fn next(&mut self) -> Option<char> {
-        use unicode::normalization::canonical_combining_class;
-
         match self.buffer.as_slice().head() {
             Some(&(c, 0)) => {
                 self.sorted = false;
@@ -247,8 +259,8 @@ impl<'a> Iterator<char> for Decompositions<'a> {
         }
 
         let decomposer = match self.kind {
-            Canonical => char::decompose_canonical,
-            Compatible => char::decompose_compatible
+            Canonical => unicode::char::decompose_canonical,
+            Compatible => unicode::char::decompose_compatible
         };
 
         if !self.sorted {
@@ -256,7 +268,7 @@ impl<'a> Iterator<char> for Decompositions<'a> {
                 let buffer = &mut self.buffer;
                 let sorted = &mut self.sorted;
                 decomposer(ch, |d| {
-                    let class = canonical_combining_class(d);
+                    let class = unicode::char::canonical_combining_class(d);
                     if class == 0 && !*sorted {
                         canonical_sort(buffer.as_mut_slice());
                         *sorted = true;
@@ -299,6 +311,15 @@ impl<'a> Iterator<char> for Decompositions<'a> {
 /// # Return value
 ///
 /// The original string with all occurrences of `from` replaced with `to`
+///
+/// # Example
+///
+/// ```rust
+/// use std::str;
+/// let string = "orange";
+/// let new_string = str::replace(string, "or", "str");
+/// assert_eq!(new_string.as_slice(), "strange");
+/// ```
 pub fn replace(s: &str, from: &str, to: &str) -> String {
     let mut result = String::new();
     let mut last_end = 0;
@@ -315,51 +336,16 @@ pub fn replace(s: &str, from: &str, to: &str) -> String {
 Section: Misc
 */
 
-/// Decode a UTF-16 encoded vector `v` into a string, returning `None`
-/// if `v` contains any invalid data.
-///
-/// # Example
-///
-/// ```rust
-/// use std::str;
-///
-/// // 𝄞music
-/// let mut v = [0xD834, 0xDD1E, 0x006d, 0x0075,
-///              0x0073, 0x0069, 0x0063];
-/// assert_eq!(str::from_utf16(v), Some("𝄞music".to_string()));
-///
-/// // 𝄞mu<invalid>ic
-/// v[4] = 0xD800;
-/// assert_eq!(str::from_utf16(v), None);
-/// ```
+/// Deprecated. Use `String::from_utf16`.
+#[deprecated = "Replaced by String::from_utf16"]
 pub fn from_utf16(v: &[u16]) -> Option<String> {
-    let mut s = String::with_capacity(v.len() / 2);
-    for c in utf16_items(v) {
-        match c {
-            ScalarValue(c) => s.push_char(c),
-            LoneSurrogate(_) => return None
-        }
-    }
-    Some(s)
+    String::from_utf16(v)
 }
 
-/// Decode a UTF-16 encoded vector `v` into a string, replacing
-/// invalid data with the replacement character (U+FFFD).
-///
-/// # Example
-/// ```rust
-/// use std::str;
-///
-/// // 𝄞mus<invalid>ic<invalid>
-/// let v = [0xD834, 0xDD1E, 0x006d, 0x0075,
-///          0x0073, 0xDD1E, 0x0069, 0x0063,
-///          0xD834];
-///
-/// assert_eq!(str::from_utf16_lossy(v),
-///            "𝄞mus\uFFFDic\uFFFD".to_string());
-/// ```
+/// Deprecated. Use `String::from_utf16_lossy`.
+#[deprecated = "Replaced by String::from_utf16_lossy"]
 pub fn from_utf16_lossy(v: &[u16]) -> String {
-    utf16_items(v).map(|c| c.to_char_lossy()).collect()
+    String::from_utf16_lossy(v)
 }
 
 // Return the initial codepoint accumulator for the first byte.
@@ -374,131 +360,10 @@ macro_rules! utf8_acc_cont_byte(
     ($ch:expr, $byte:expr) => (($ch << 6) | ($byte & 63u8) as u32)
 )
 
-static TAG_CONT_U8: u8 = 128u8;
-
-/// Converts a vector of bytes to a new utf-8 string.
-/// Any invalid utf-8 sequences are replaced with U+FFFD REPLACEMENT CHARACTER.
-///
-/// # Example
-///
-/// ```rust
-/// let input = b"Hello \xF0\x90\x80World";
-/// let output = std::str::from_utf8_lossy(input);
-/// assert_eq!(output.as_slice(), "Hello \uFFFDWorld");
-/// ```
+/// Deprecated. Use `String::from_utf8_lossy`.
+#[deprecated = "Replaced by String::from_utf8_lossy"]
 pub fn from_utf8_lossy<'a>(v: &'a [u8]) -> MaybeOwned<'a> {
-    if is_utf8(v) {
-        return Slice(unsafe { mem::transmute(v) })
-    }
-
-    static REPLACEMENT: &'static [u8] = b"\xEF\xBF\xBD"; // U+FFFD in UTF-8
-    let mut i = 0;
-    let total = v.len();
-    fn unsafe_get(xs: &[u8], i: uint) -> u8 {
-        unsafe { *xs.unsafe_ref(i) }
-    }
-    fn safe_get(xs: &[u8], i: uint, total: uint) -> u8 {
-        if i >= total {
-            0
-        } else {
-            unsafe_get(xs, i)
-        }
-    }
-
-    let mut res = String::with_capacity(total);
-
-    if i > 0 {
-        unsafe {
-            res.push_bytes(v.slice_to(i))
-        };
-    }
-
-    // subseqidx is the index of the first byte of the subsequence we're looking at.
-    // It's used to copy a bunch of contiguous good codepoints at once instead of copying
-    // them one by one.
-    let mut subseqidx = 0;
-
-    while i < total {
-        let i_ = i;
-        let byte = unsafe_get(v, i);
-        i += 1;
-
-        macro_rules! error(() => ({
-            unsafe {
-                if subseqidx != i_ {
-                    res.push_bytes(v.slice(subseqidx, i_));
-                }
-                subseqidx = i;
-                res.push_bytes(REPLACEMENT);
-            }
-        }))
-
-        if byte < 128u8 {
-            // subseqidx handles this
-        } else {
-            let w = utf8_char_width(byte);
-
-            match w {
-                2 => {
-                    if safe_get(v, i, total) & 192u8 != TAG_CONT_U8 {
-                        error!();
-                        continue;
-                    }
-                    i += 1;
-                }
-                3 => {
-                    match (byte, safe_get(v, i, total)) {
-                        (0xE0        , 0xA0 .. 0xBF) => (),
-                        (0xE1 .. 0xEC, 0x80 .. 0xBF) => (),
-                        (0xED        , 0x80 .. 0x9F) => (),
-                        (0xEE .. 0xEF, 0x80 .. 0xBF) => (),
-                        _ => {
-                            error!();
-                            continue;
-                        }
-                    }
-                    i += 1;
-                    if safe_get(v, i, total) & 192u8 != TAG_CONT_U8 {
-                        error!();
-                        continue;
-                    }
-                    i += 1;
-                }
-                4 => {
-                    match (byte, safe_get(v, i, total)) {
-                        (0xF0        , 0x90 .. 0xBF) => (),
-                        (0xF1 .. 0xF3, 0x80 .. 0xBF) => (),
-                        (0xF4        , 0x80 .. 0x8F) => (),
-                        _ => {
-                            error!();
-                            continue;
-                        }
-                    }
-                    i += 1;
-                    if safe_get(v, i, total) & 192u8 != TAG_CONT_U8 {
-                        error!();
-                        continue;
-                    }
-                    i += 1;
-                    if safe_get(v, i, total) & 192u8 != TAG_CONT_U8 {
-                        error!();
-                        continue;
-                    }
-                    i += 1;
-                }
-                _ => {
-                    error!();
-                    continue;
-                }
-            }
-        }
-    }
-    if subseqidx < total {
-        unsafe {
-            res.push_bytes(v.slice(subseqidx, total))
-        };
-    }
-    Owned(res.into_string())
+    String::from_utf8_lossy(v)
 }
 
 /*
@@ -520,6 +385,14 @@ pub type SendStr = MaybeOwned<'static>;
 
 impl<'a> MaybeOwned<'a> {
     /// Returns `true` if this `MaybeOwned` wraps an owned string
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// let string = String::from_str("orange");
+    /// let maybe_owned_string = string.into_maybe_owned();
+    /// assert_eq!(true, maybe_owned_string.is_owned());
+    /// ```
     #[inline]
     pub fn is_owned(&self) -> bool {
         match *self {
@@ -529,6 +402,14 @@ impl<'a> MaybeOwned<'a> {
     }
 
     /// Returns `true` if this `MaybeOwned` wraps a borrowed string
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// let string = "orange";
+    /// let maybe_owned_string = string.as_slice().into_maybe_owned();
+    /// assert_eq!(true, maybe_owned_string.is_slice());
+    /// ```
     #[inline]
     pub fn is_slice(&self) -> bool {
         match *self {
@@ -544,6 +425,13 @@ pub trait IntoMaybeOwned<'a> {
     fn into_maybe_owned(self) -> MaybeOwned<'a>;
 }
 
+/// # Example
+///
+/// ```rust
+/// let owned_string = String::from_str("orange");
+/// let maybe_owned_string = owned_string.into_maybe_owned();
+/// assert_eq!(true, maybe_owned_string.is_owned());
+/// ```
 impl<'a> IntoMaybeOwned<'a> for String {
     #[inline]
     fn into_maybe_owned(self) -> MaybeOwned<'a> {
@@ -551,11 +439,26 @@ impl<'a> IntoMaybeOwned<'a> for String {
     }
 }
 
+/// # Example
+///
+/// ```rust
+/// let string = "orange";
+/// let maybe_owned_str = string.as_slice().into_maybe_owned();
+/// assert_eq!(false, maybe_owned_str.is_owned());
+/// ```
 impl<'a> IntoMaybeOwned<'a> for &'a str {
     #[inline]
     fn into_maybe_owned(self) -> MaybeOwned<'a> { Slice(self) }
 }
 
+/// # Example
+///
+/// ```rust
+/// let str = "orange";
+/// let maybe_owned_str = str.as_slice().into_maybe_owned();
+/// let maybe_maybe_owned_str = maybe_owned_str.into_maybe_owned();
+/// assert_eq!(false, maybe_maybe_owned_str.is_owned());
+/// ```
 impl<'a> IntoMaybeOwned<'a> for MaybeOwned<'a> {
     #[inline]
     fn into_maybe_owned(self) -> MaybeOwned<'a> { self }
@@ -572,8 +475,8 @@ impl<'a> Eq for MaybeOwned<'a> {}
 
 impl<'a> PartialOrd for MaybeOwned<'a> {
     #[inline]
-    fn lt(&self, other: &MaybeOwned) -> bool {
-        self.as_slice().lt(&other.as_slice())
+    fn partial_cmp(&self, other: &MaybeOwned) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -605,7 +508,7 @@ impl<'a> StrAllocating for MaybeOwned<'a> {
     #[inline]
     fn into_string(self) -> String {
         match self {
-            Slice(s) => s.to_string(),
+            Slice(s) => String::from_str(s),
             Owned(s) => s
         }
     }
@@ -621,7 +524,7 @@ impl<'a> Clone for MaybeOwned<'a> {
     fn clone(&self) -> MaybeOwned<'a> {
         match *self {
             Slice(s) => Slice(s),
-            Owned(ref s) => Owned(s.to_string())
+            Owned(ref s) => Owned(String::from_str(s.as_slice()))
         }
     }
 }
@@ -661,7 +564,7 @@ pub mod raw {
     pub use core::str::raw::{slice_unchecked};
 
     /// Create a Rust string from a *u8 buffer of the given length
-    pub unsafe fn from_buf_len(buf: *u8, len: uint) -> String {
+    pub unsafe fn from_buf_len(buf: *const u8, len: uint) -> String {
         let mut result = String::new();
         result.push_bytes(mem::transmute(Slice {
             data: buf,
@@ -671,7 +574,7 @@ pub mod raw {
     }
 
     /// Create a Rust string from a null-terminated C string
-    pub unsafe fn from_c_str(c_string: *i8) -> String {
+    pub unsafe fn from_c_str(c_string: *const i8) -> String {
         let mut buf = String::new();
         let mut len = 0;
         while *c_string.offset(len) != 0 {
@@ -704,13 +607,12 @@ pub mod raw {
     #[test]
     fn test_from_buf_len() {
         use slice::ImmutableVector;
-        use str::StrAllocating;
 
         unsafe {
             let a = vec![65u8, 65u8, 65u8, 65u8, 65u8, 65u8, 65u8, 0u8];
             let b = a.as_ptr();
             let c = from_buf_len(b, 3u);
-            assert_eq!(c, "AAA".to_string());
+            assert_eq!(c, String::from_str("AAA"));
         }
     }
 }
@@ -723,12 +625,6 @@ Section: Trait implementations
 pub trait StrAllocating: Str {
     /// Convert `self` into a `String`, not making a copy if possible.
     fn into_string(self) -> String;
-
-    /// Convert `self` into a `String`.
-    #[inline]
-    fn to_string(&self) -> String {
-        String::from_str(self.as_slice())
-    }
 
     #[allow(missing_doc)]
     #[deprecated = "replaced by .into_string()"]
@@ -803,15 +699,9 @@ pub trait StrAllocating: Str {
     }
 
     /// Converts to a vector of `u16` encoded as UTF-16.
+    #[deprecated = "use `utf16_units` instead"]
     fn to_utf16(&self) -> Vec<u16> {
-        let me = self.as_slice();
-        let mut u = Vec::new();
-        for ch in me.chars() {
-            let mut buf = [0u16, ..2];
-            let n = ch.encode_utf16(buf /* as mut slice! */);
-            u.push_all(buf.slice_to(n));
-        }
-        u
+        self.as_slice().utf16_units().collect::<Vec<u16>>()
     }
 
     /// Given a string, make a new string with repeated copies of it.
@@ -887,7 +777,7 @@ pub trait StrAllocating: Str {
 impl<'a> StrAllocating for &'a str {
     #[inline]
     fn into_string(self) -> String {
-        self.to_string()
+        String::from_str(self)
     }
 }
 
@@ -917,13 +807,23 @@ impl OwnedStr for String {
 
 #[cfg(test)]
 mod tests {
-    use std::prelude::*;
     use std::iter::AdditiveIterator;
+    use std::iter::range;
     use std::default::Default;
+    use std::char::Char;
+    use std::clone::Clone;
+    use std::cmp::{Equal, Greater, Less, Ord, PartialOrd, Equiv};
+    use std::option::{Some, None};
+    use std::ptr::RawPtr;
+    use std::iter::{Iterator, DoubleEndedIterator};
+    use Collection;
 
-    use str::*;
+    use super::*;
+    use std::slice::{Vector, ImmutableVector};
     use string::String;
     use vec::Vec;
+
+    use unicode::char::UnicodeChar;
 
     #[test]
     fn test_eq_slice() {
@@ -958,6 +858,15 @@ mod tests {
         assert_eq!("\u2620".char_len(), 1u);
         assert_eq!("\U0001d11e".char_len(), 1u);
         assert_eq!("ประเทศไทย中华Việt Nam".char_len(), 19u);
+
+        assert_eq!("ｈｅｌｌｏ".width(false), 10u);
+        assert_eq!("ｈｅｌｌｏ".width(true), 10u);
+        assert_eq!("\0\0\0\0\0".width(false), 0u);
+        assert_eq!("\0\0\0\0\0".width(true), 0u);
+        assert_eq!("".width(false), 0u);
+        assert_eq!("".width(true), 0u);
+        assert_eq!("\u2081\u2082\u2083\u2084".width(false), 4u);
+        assert_eq!("\u2081\u2082\u2083\u2084".width(true), 8u);
     }
 
     #[test]
@@ -982,17 +891,17 @@ mod tests {
 
     #[test]
     fn test_collect() {
-        let empty = "".to_string();
+        let empty = String::from_str("");
         let s: String = empty.as_slice().chars().collect();
         assert_eq!(empty, s);
-        let data = "ประเทศไทย中".to_string();
+        let data = String::from_str("ประเทศไทย中");
         let s: String = data.as_slice().chars().collect();
         assert_eq!(data, s);
     }
 
     #[test]
     fn test_into_bytes() {
-        let data = "asdf".to_string();
+        let data = String::from_str("asdf");
         let buf = data.into_bytes();
         assert_eq!(b"asdf", buf.as_slice());
     }
@@ -1009,7 +918,7 @@ mod tests {
         assert!(data.slice(2u, 4u).find_str("ab").is_none());
 
         let string = "ประเทศไทย中华Việt Nam";
-        let mut data = string.to_string();
+        let mut data = String::from_str(string);
         data.push_str(string);
         assert!(data.as_slice().find_str("ไท华").is_none());
         assert_eq!(data.as_slice().slice(0u, 43u).find_str(""), Some(0u));
@@ -1046,11 +955,13 @@ mod tests {
         fn t(v: &[String], s: &str) {
             assert_eq!(v.concat().as_slice(), s);
         }
-        t(["you".to_string(), "know".to_string(), "I'm".to_string(),
-          "no".to_string(), "good".to_string()], "youknowI'mnogood");
+        t([String::from_str("you"), String::from_str("know"),
+           String::from_str("I'm"),
+           String::from_str("no"), String::from_str("good")],
+          "youknowI'mnogood");
         let v: &[String] = [];
         t(v, "");
-        t(["hi".to_string()], "hi");
+        t([String::from_str("hi")], "hi");
     }
 
     #[test]
@@ -1058,12 +969,13 @@ mod tests {
         fn t(v: &[String], sep: &str, s: &str) {
             assert_eq!(v.connect(sep).as_slice(), s);
         }
-        t(["you".to_string(), "know".to_string(), "I'm".to_string(),
-           "no".to_string(), "good".to_string()],
+        t([String::from_str("you"), String::from_str("know"),
+           String::from_str("I'm"),
+           String::from_str("no"), String::from_str("good")],
           " ", "you know I'm no good");
         let v: &[String] = [];
         t(v, " ", "");
-        t(["hi".to_string()], " ", "hi");
+        t([String::from_str("hi")], " ", "hi");
     }
 
     #[test]
@@ -1090,11 +1002,11 @@ mod tests {
 
     #[test]
     fn test_repeat() {
-        assert_eq!("x".repeat(4), "xxxx".to_string());
-        assert_eq!("hi".repeat(4), "hihihihi".to_string());
-        assert_eq!("ไท华".repeat(3), "ไท华ไท华ไท华".to_string());
-        assert_eq!("".repeat(4), "".to_string());
-        assert_eq!("hi".repeat(0), "".to_string());
+        assert_eq!("x".repeat(4), String::from_str("xxxx"));
+        assert_eq!("hi".repeat(4), String::from_str("hihihihi"));
+        assert_eq!("ไท华".repeat(3), String::from_str("ไท华ไท华ไท华"));
+        assert_eq!("".repeat(4), String::from_str(""));
+        assert_eq!("hi".repeat(0), String::from_str(""));
     }
 
     #[test]
@@ -1103,7 +1015,7 @@ mod tests {
         assert_eq!("bc", unsafe {raw::slice_bytes("abc", 1, 3)});
         assert_eq!("", unsafe {raw::slice_bytes("abc", 1, 1)});
         fn a_million_letter_a() -> String {
-            let mut i = 0;
+            let mut i = 0u;
             let mut rs = String::new();
             while i < 100000 {
                 rs.push_str("aaaaaaaaaa");
@@ -1112,7 +1024,7 @@ mod tests {
             rs
         }
         fn half_a_million_letter_a() -> String {
-            let mut i = 0;
+            let mut i = 0u;
             let mut rs = String::new();
             while i < 100000 {
                 rs.push_str("aaaaa");
@@ -1122,9 +1034,9 @@ mod tests {
         }
         let letters = a_million_letter_a();
         assert!(half_a_million_letter_a() ==
-            unsafe {raw::slice_bytes(letters.as_slice(),
+            unsafe {String::from_str(raw::slice_bytes(letters.as_slice(),
                                      0u,
-                                     500000)}.to_string());
+                                     500000))});
     }
 
     #[test]
@@ -1158,13 +1070,13 @@ mod tests {
     #[test]
     fn test_replace() {
         let a = "a";
-        assert_eq!("".replace(a, "b"), "".to_string());
-        assert_eq!("a".replace(a, "b"), "b".to_string());
-        assert_eq!("ab".replace(a, "b"), "bb".to_string());
+        assert_eq!("".replace(a, "b"), String::from_str(""));
+        assert_eq!("a".replace(a, "b"), String::from_str("b"));
+        assert_eq!("ab".replace(a, "b"), String::from_str("bb"));
         let test = "test";
         assert!(" test test ".replace(test, "toast") ==
-            " toast toast ".to_string());
-        assert_eq!(" test test ".replace(test, ""), "   ".to_string());
+            String::from_str(" toast toast "));
+        assert_eq!(" test test ".replace(test, ""), String::from_str("   "));
     }
 
     #[test]
@@ -1220,7 +1132,7 @@ mod tests {
         assert_eq!("华", data.slice(30, 33));
 
         fn a_million_letter_x() -> String {
-            let mut i = 0;
+            let mut i = 0u;
             let mut rs = String::new();
             while i < 100000 {
                 rs.push_str("华华华华华华华华华华");
@@ -1229,7 +1141,7 @@ mod tests {
             rs
         }
         fn half_a_million_letter_x() -> String {
-            let mut i = 0;
+            let mut i = 0u;
             let mut rs = String::new();
             while i < 100000 {
                 rs.push_str("华华华华华");
@@ -1239,7 +1151,7 @@ mod tests {
         }
         let letters = a_million_letter_x();
         assert!(half_a_million_letter_x() ==
-            letters.as_slice().slice(0u, 3u * 500000u).to_string());
+            String::from_str(letters.as_slice().slice(0u, 3u * 500000u)));
     }
 
     #[test]
@@ -1467,7 +1379,7 @@ mod tests {
             let a = vec![65, 65, 65, 65, 65, 65, 65, 0];
             let b = a.as_ptr();
             let c = raw::from_c_str(b);
-            assert_eq!(c, "AAAAAAA".to_string());
+            assert_eq!(c, String::from_str("AAAAAAA"));
         }
     }
 
@@ -1489,7 +1401,7 @@ mod tests {
     fn test_as_bytes_fail() {
         // Don't double free. (I'm not sure if this exercises the
         // original problem code path anymore.)
-        let s = "".to_string();
+        let s = String::from_str("");
         let _bytes = s.as_bytes();
         fail!();
     }
@@ -1532,17 +1444,17 @@ mod tests {
 
     #[test]
     fn vec_str_conversions() {
-        let s1: String = "All mimsy were the borogoves".to_string();
+        let s1: String = String::from_str("All mimsy were the borogoves");
 
         let v: Vec<u8> = Vec::from_slice(s1.as_bytes());
-        let s2: String = from_utf8(v.as_slice()).unwrap().to_string();
+        let s2: String = String::from_str(from_utf8(v.as_slice()).unwrap());
         let mut i: uint = 0u;
         let n1: uint = s1.len();
         let n2: uint = v.len();
         assert_eq!(n1, n2);
         while i < n1 {
-            let a: u8 = s1.as_slice()[i];
-            let b: u8 = s2.as_slice()[i];
+            let a: u8 = s1.as_bytes()[i];
+            let b: u8 = s2.as_bytes()[i];
             debug!("{}", a);
             debug!("{}", b);
             assert_eq!(a, b);
@@ -1576,92 +1488,6 @@ mod tests {
     }
 
     #[test]
-    fn test_utf16() {
-        let pairs =
-            [("𐍅𐌿𐌻𐍆𐌹𐌻𐌰\n".to_string(),
-              vec![0xd800_u16, 0xdf45_u16, 0xd800_u16, 0xdf3f_u16,
-                0xd800_u16, 0xdf3b_u16, 0xd800_u16, 0xdf46_u16,
-                0xd800_u16, 0xdf39_u16, 0xd800_u16, 0xdf3b_u16,
-                0xd800_u16, 0xdf30_u16, 0x000a_u16]),
-
-             ("𐐒𐑉𐐮𐑀𐐲𐑋 𐐏𐐲𐑍\n".to_string(),
-              vec![0xd801_u16, 0xdc12_u16, 0xd801_u16,
-                0xdc49_u16, 0xd801_u16, 0xdc2e_u16, 0xd801_u16,
-                0xdc40_u16, 0xd801_u16, 0xdc32_u16, 0xd801_u16,
-                0xdc4b_u16, 0x0020_u16, 0xd801_u16, 0xdc0f_u16,
-                0xd801_u16, 0xdc32_u16, 0xd801_u16, 0xdc4d_u16,
-                0x000a_u16]),
-
-             ("𐌀𐌖𐌋𐌄𐌑𐌉·𐌌𐌄𐌕𐌄𐌋𐌉𐌑\n".to_string(),
-              vec![0xd800_u16, 0xdf00_u16, 0xd800_u16, 0xdf16_u16,
-                0xd800_u16, 0xdf0b_u16, 0xd800_u16, 0xdf04_u16,
-                0xd800_u16, 0xdf11_u16, 0xd800_u16, 0xdf09_u16,
-                0x00b7_u16, 0xd800_u16, 0xdf0c_u16, 0xd800_u16,
-                0xdf04_u16, 0xd800_u16, 0xdf15_u16, 0xd800_u16,
-                0xdf04_u16, 0xd800_u16, 0xdf0b_u16, 0xd800_u16,
-                0xdf09_u16, 0xd800_u16, 0xdf11_u16, 0x000a_u16 ]),
-
-             ("𐒋𐒘𐒈𐒑𐒛𐒒 𐒕𐒓 𐒈𐒚𐒍 𐒏𐒜𐒒𐒖𐒆 𐒕𐒆\n".to_string(),
-              vec![0xd801_u16, 0xdc8b_u16, 0xd801_u16, 0xdc98_u16,
-                0xd801_u16, 0xdc88_u16, 0xd801_u16, 0xdc91_u16,
-                0xd801_u16, 0xdc9b_u16, 0xd801_u16, 0xdc92_u16,
-                0x0020_u16, 0xd801_u16, 0xdc95_u16, 0xd801_u16,
-                0xdc93_u16, 0x0020_u16, 0xd801_u16, 0xdc88_u16,
-                0xd801_u16, 0xdc9a_u16, 0xd801_u16, 0xdc8d_u16,
-                0x0020_u16, 0xd801_u16, 0xdc8f_u16, 0xd801_u16,
-                0xdc9c_u16, 0xd801_u16, 0xdc92_u16, 0xd801_u16,
-                0xdc96_u16, 0xd801_u16, 0xdc86_u16, 0x0020_u16,
-                0xd801_u16, 0xdc95_u16, 0xd801_u16, 0xdc86_u16,
-                0x000a_u16 ]),
-             // Issue #12318, even-numbered non-BMP planes
-             ("\U00020000".to_string(),
-              vec![0xD840, 0xDC00])];
-
-        for p in pairs.iter() {
-            let (s, u) = (*p).clone();
-            assert!(is_utf16(u.as_slice()));
-            assert_eq!(s.to_utf16(), u);
-
-            assert_eq!(from_utf16(u.as_slice()).unwrap(), s);
-            assert_eq!(from_utf16_lossy(u.as_slice()), s);
-
-            assert_eq!(from_utf16(s.to_utf16().as_slice()).unwrap(), s);
-            assert_eq!(from_utf16(u.as_slice()).unwrap().to_utf16(), u);
-        }
-    }
-
-    #[test]
-    fn test_utf16_invalid() {
-        // completely positive cases tested above.
-        // lead + eof
-        assert_eq!(from_utf16([0xD800]), None);
-        // lead + lead
-        assert_eq!(from_utf16([0xD800, 0xD800]), None);
-
-        // isolated trail
-        assert_eq!(from_utf16([0x0061, 0xDC00]), None);
-
-        // general
-        assert_eq!(from_utf16([0xD800, 0xd801, 0xdc8b, 0xD800]), None);
-    }
-
-    #[test]
-    fn test_utf16_lossy() {
-        // completely positive cases tested above.
-        // lead + eof
-        assert_eq!(from_utf16_lossy([0xD800]), "\uFFFD".to_string());
-        // lead + lead
-        assert_eq!(from_utf16_lossy([0xD800, 0xD800]), "\uFFFD\uFFFD".to_string());
-
-        // isolated trail
-        assert_eq!(from_utf16_lossy([0x0061, 0xDC00]), "a\uFFFD".to_string());
-
-        // general
-        assert_eq!(from_utf16_lossy([0xD800, 0xd801, 0xdc8b, 0xD800]),
-                   "\uFFFD𐒋\uFFFD".to_string());
-    }
-
-    #[test]
     fn test_truncate_utf16_at_nul() {
         let v = [];
         assert_eq!(truncate_utf16_at_nul(v), &[]);
@@ -1686,7 +1512,7 @@ mod tests {
         let mut pos = 0;
         for ch in v.iter() {
             assert!(s.char_at(pos) == *ch);
-            pos += from_char(*ch).len();
+            pos += String::from_char(1, *ch).len();
         }
     }
 
@@ -1697,33 +1523,35 @@ mod tests {
         let mut pos = s.len();
         for ch in v.iter().rev() {
             assert!(s.char_at_reverse(pos) == *ch);
-            pos -= from_char(*ch).len();
+            pos -= String::from_char(1, *ch).len();
         }
     }
 
     #[test]
     fn test_escape_unicode() {
-        assert_eq!("abc".escape_unicode(), "\\x61\\x62\\x63".to_string());
-        assert_eq!("a c".escape_unicode(), "\\x61\\x20\\x63".to_string());
-        assert_eq!("\r\n\t".escape_unicode(), "\\x0d\\x0a\\x09".to_string());
-        assert_eq!("'\"\\".escape_unicode(), "\\x27\\x22\\x5c".to_string());
-        assert_eq!("\x00\x01\xfe\xff".escape_unicode(), "\\x00\\x01\\xfe\\xff".to_string());
-        assert_eq!("\u0100\uffff".escape_unicode(), "\\u0100\\uffff".to_string());
-        assert_eq!("\U00010000\U0010ffff".escape_unicode(), "\\U00010000\\U0010ffff".to_string());
-        assert_eq!("ab\ufb00".escape_unicode(), "\\x61\\x62\\ufb00".to_string());
-        assert_eq!("\U0001d4ea\r".escape_unicode(), "\\U0001d4ea\\x0d".to_string());
+        assert_eq!("abc".escape_unicode(), String::from_str("\\x61\\x62\\x63"));
+        assert_eq!("a c".escape_unicode(), String::from_str("\\x61\\x20\\x63"));
+        assert_eq!("\r\n\t".escape_unicode(), String::from_str("\\x0d\\x0a\\x09"));
+        assert_eq!("'\"\\".escape_unicode(), String::from_str("\\x27\\x22\\x5c"));
+        assert_eq!("\x00\x01\xfe\xff".escape_unicode(), String::from_str("\\x00\\x01\\xfe\\xff"));
+        assert_eq!("\u0100\uffff".escape_unicode(), String::from_str("\\u0100\\uffff"));
+        assert_eq!("\U00010000\U0010ffff".escape_unicode(),
+                   String::from_str("\\U00010000\\U0010ffff"));
+        assert_eq!("ab\ufb00".escape_unicode(), String::from_str("\\x61\\x62\\ufb00"));
+        assert_eq!("\U0001d4ea\r".escape_unicode(), String::from_str("\\U0001d4ea\\x0d"));
     }
 
     #[test]
     fn test_escape_default() {
-        assert_eq!("abc".escape_default(), "abc".to_string());
-        assert_eq!("a c".escape_default(), "a c".to_string());
-        assert_eq!("\r\n\t".escape_default(), "\\r\\n\\t".to_string());
-        assert_eq!("'\"\\".escape_default(), "\\'\\\"\\\\".to_string());
-        assert_eq!("\u0100\uffff".escape_default(), "\\u0100\\uffff".to_string());
-        assert_eq!("\U00010000\U0010ffff".escape_default(), "\\U00010000\\U0010ffff".to_string());
-        assert_eq!("ab\ufb00".escape_default(), "ab\\ufb00".to_string());
-        assert_eq!("\U0001d4ea\r".escape_default(), "\\U0001d4ea\\r".to_string());
+        assert_eq!("abc".escape_default(), String::from_str("abc"));
+        assert_eq!("a c".escape_default(), String::from_str("a c"));
+        assert_eq!("\r\n\t".escape_default(), String::from_str("\\r\\n\\t"));
+        assert_eq!("'\"\\".escape_default(), String::from_str("\\'\\\"\\\\"));
+        assert_eq!("\u0100\uffff".escape_default(), String::from_str("\\u0100\\uffff"));
+        assert_eq!("\U00010000\U0010ffff".escape_default(),
+                   String::from_str("\\U00010000\\U0010ffff"));
+        assert_eq!("ab\ufb00".escape_default(), String::from_str("ab\\ufb00"));
+        assert_eq!("\U0001d4ea\r".escape_default(), String::from_str("\\U0001d4ea\\r"));
     }
 
     #[test]
@@ -1781,6 +1609,30 @@ mod tests {
             pos += 1;
         }
         assert_eq!(pos, v.len());
+    }
+
+    #[test]
+    fn test_chars_decoding() {
+        let mut bytes = [0u8, ..4];
+        for c in range(0u32, 0x110000).filter_map(|c| ::core::char::from_u32(c)) {
+            let len = c.encode_utf8(bytes);
+            let s = ::core::str::from_utf8(bytes.slice_to(len)).unwrap();
+            if Some(c) != s.chars().next() {
+                fail!("character {:x}={} does not decode correctly", c as u32, c);
+            }
+        }
+    }
+
+    #[test]
+    fn test_chars_rev_decoding() {
+        let mut bytes = [0u8, ..4];
+        for c in range(0u32, 0x110000).filter_map(|c| ::core::char::from_u32(c)) {
+            let len = c.encode_utf8(bytes);
+            let s = ::core::str::from_utf8(bytes.slice_to(len)).unwrap();
+            if Some(c) != s.chars().rev().next() {
+                fail!("character {:x}={} does not decode correctly", c as u32, c);
+            }
+        }
     }
 
     #[test]
@@ -1964,30 +1816,39 @@ mod tests {
 
     #[test]
     fn test_nfd_chars() {
-        assert_eq!("abc".nfd_chars().collect::<String>(), "abc".to_string());
-        assert_eq!("\u1e0b\u01c4".nfd_chars().collect::<String>(), "d\u0307\u01c4".to_string());
-        assert_eq!("\u2026".nfd_chars().collect::<String>(), "\u2026".to_string());
-        assert_eq!("\u2126".nfd_chars().collect::<String>(), "\u03a9".to_string());
-        assert_eq!("\u1e0b\u0323".nfd_chars().collect::<String>(), "d\u0323\u0307".to_string());
-        assert_eq!("\u1e0d\u0307".nfd_chars().collect::<String>(), "d\u0323\u0307".to_string());
-        assert_eq!("a\u0301".nfd_chars().collect::<String>(), "a\u0301".to_string());
-        assert_eq!("\u0301a".nfd_chars().collect::<String>(), "\u0301a".to_string());
-        assert_eq!("\ud4db".nfd_chars().collect::<String>(), "\u1111\u1171\u11b6".to_string());
-        assert_eq!("\uac1c".nfd_chars().collect::<String>(), "\u1100\u1162".to_string());
+        assert_eq!("abc".nfd_chars().collect::<String>(), String::from_str("abc"));
+        assert_eq!("\u1e0b\u01c4".nfd_chars().collect::<String>(),
+                   String::from_str("d\u0307\u01c4"));
+        assert_eq!("\u2026".nfd_chars().collect::<String>(), String::from_str("\u2026"));
+        assert_eq!("\u2126".nfd_chars().collect::<String>(), String::from_str("\u03a9"));
+        assert_eq!("\u1e0b\u0323".nfd_chars().collect::<String>(),
+                   String::from_str("d\u0323\u0307"));
+        assert_eq!("\u1e0d\u0307".nfd_chars().collect::<String>(),
+                   String::from_str("d\u0323\u0307"));
+        assert_eq!("a\u0301".nfd_chars().collect::<String>(), String::from_str("a\u0301"));
+        assert_eq!("\u0301a".nfd_chars().collect::<String>(), String::from_str("\u0301a"));
+        assert_eq!("\ud4db".nfd_chars().collect::<String>(),
+                   String::from_str("\u1111\u1171\u11b6"));
+        assert_eq!("\uac1c".nfd_chars().collect::<String>(), String::from_str("\u1100\u1162"));
     }
 
     #[test]
     fn test_nfkd_chars() {
-        assert_eq!("abc".nfkd_chars().collect::<String>(), "abc".to_string());
-        assert_eq!("\u1e0b\u01c4".nfkd_chars().collect::<String>(), "d\u0307DZ\u030c".to_string());
-        assert_eq!("\u2026".nfkd_chars().collect::<String>(), "...".to_string());
-        assert_eq!("\u2126".nfkd_chars().collect::<String>(), "\u03a9".to_string());
-        assert_eq!("\u1e0b\u0323".nfkd_chars().collect::<String>(), "d\u0323\u0307".to_string());
-        assert_eq!("\u1e0d\u0307".nfkd_chars().collect::<String>(), "d\u0323\u0307".to_string());
-        assert_eq!("a\u0301".nfkd_chars().collect::<String>(), "a\u0301".to_string());
-        assert_eq!("\u0301a".nfkd_chars().collect::<String>(), "\u0301a".to_string());
-        assert_eq!("\ud4db".nfkd_chars().collect::<String>(), "\u1111\u1171\u11b6".to_string());
-        assert_eq!("\uac1c".nfkd_chars().collect::<String>(), "\u1100\u1162".to_string());
+        assert_eq!("abc".nfkd_chars().collect::<String>(), String::from_str("abc"));
+        assert_eq!("\u1e0b\u01c4".nfkd_chars().collect::<String>(),
+                   String::from_str("d\u0307DZ\u030c"));
+        assert_eq!("\u2026".nfkd_chars().collect::<String>(), String::from_str("..."));
+        assert_eq!("\u2126".nfkd_chars().collect::<String>(), String::from_str("\u03a9"));
+        assert_eq!("\u1e0b\u0323".nfkd_chars().collect::<String>(),
+                   String::from_str("d\u0323\u0307"));
+        assert_eq!("\u1e0d\u0307".nfkd_chars().collect::<String>(),
+                   String::from_str("d\u0323\u0307"));
+        assert_eq!("a\u0301".nfkd_chars().collect::<String>(), String::from_str("a\u0301"));
+        assert_eq!("\u0301a".nfkd_chars().collect::<String>(),
+                   String::from_str("\u0301a"));
+        assert_eq!("\ud4db".nfkd_chars().collect::<String>(),
+                   String::from_str("\u1111\u1171\u11b6"));
+        assert_eq!("\uac1c".nfkd_chars().collect::<String>(), String::from_str("\u1100\u1162"));
     }
 
     #[test]
@@ -1999,6 +1860,286 @@ mod tests {
         let data = "\nMäry häd ä little lämb\n\nLittle lämb"; // no trailing \n
         let lines: Vec<&str> = data.lines().collect();
         assert_eq!(lines, vec!["", "Märy häd ä little lämb", "", "Little lämb"]);
+    }
+
+    #[test]
+    fn test_graphemes() {
+        use std::iter::order;
+        // official Unicode test data
+        // from http://www.unicode.org/Public/UCD/latest/ucd/auxiliary/GraphemeBreakTest.txt
+        let test_same = [
+            ("\u0020\u0020", &["\u0020", "\u0020"]), ("\u0020\u0308\u0020", &["\u0020\u0308",
+            "\u0020"]), ("\u0020\u000D", &["\u0020", "\u000D"]), ("\u0020\u0308\u000D",
+            &["\u0020\u0308", "\u000D"]), ("\u0020\u000A", &["\u0020", "\u000A"]),
+            ("\u0020\u0308\u000A", &["\u0020\u0308", "\u000A"]), ("\u0020\u0001", &["\u0020",
+            "\u0001"]), ("\u0020\u0308\u0001", &["\u0020\u0308", "\u0001"]), ("\u0020\u0300",
+            &["\u0020\u0300"]), ("\u0020\u0308\u0300", &["\u0020\u0308\u0300"]), ("\u0020\u1100",
+            &["\u0020", "\u1100"]), ("\u0020\u0308\u1100", &["\u0020\u0308", "\u1100"]),
+            ("\u0020\u1160", &["\u0020", "\u1160"]), ("\u0020\u0308\u1160", &["\u0020\u0308",
+            "\u1160"]), ("\u0020\u11A8", &["\u0020", "\u11A8"]), ("\u0020\u0308\u11A8",
+            &["\u0020\u0308", "\u11A8"]), ("\u0020\uAC00", &["\u0020", "\uAC00"]),
+            ("\u0020\u0308\uAC00", &["\u0020\u0308", "\uAC00"]), ("\u0020\uAC01", &["\u0020",
+            "\uAC01"]), ("\u0020\u0308\uAC01", &["\u0020\u0308", "\uAC01"]), ("\u0020\U0001F1E6",
+            &["\u0020", "\U0001F1E6"]), ("\u0020\u0308\U0001F1E6", &["\u0020\u0308",
+            "\U0001F1E6"]), ("\u0020\u0378", &["\u0020", "\u0378"]), ("\u0020\u0308\u0378",
+            &["\u0020\u0308", "\u0378"]), ("\u000D\u0020", &["\u000D", "\u0020"]),
+            ("\u000D\u0308\u0020", &["\u000D", "\u0308", "\u0020"]), ("\u000D\u000D", &["\u000D",
+            "\u000D"]), ("\u000D\u0308\u000D", &["\u000D", "\u0308", "\u000D"]), ("\u000D\u000A",
+            &["\u000D\u000A"]), ("\u000D\u0308\u000A", &["\u000D", "\u0308", "\u000A"]),
+            ("\u000D\u0001", &["\u000D", "\u0001"]), ("\u000D\u0308\u0001", &["\u000D", "\u0308",
+            "\u0001"]), ("\u000D\u0300", &["\u000D", "\u0300"]), ("\u000D\u0308\u0300",
+            &["\u000D", "\u0308\u0300"]), ("\u000D\u0903", &["\u000D", "\u0903"]),
+            ("\u000D\u1100", &["\u000D", "\u1100"]), ("\u000D\u0308\u1100", &["\u000D", "\u0308",
+            "\u1100"]), ("\u000D\u1160", &["\u000D", "\u1160"]), ("\u000D\u0308\u1160",
+            &["\u000D", "\u0308", "\u1160"]), ("\u000D\u11A8", &["\u000D", "\u11A8"]),
+            ("\u000D\u0308\u11A8", &["\u000D", "\u0308", "\u11A8"]), ("\u000D\uAC00", &["\u000D",
+            "\uAC00"]), ("\u000D\u0308\uAC00", &["\u000D", "\u0308", "\uAC00"]), ("\u000D\uAC01",
+            &["\u000D", "\uAC01"]), ("\u000D\u0308\uAC01", &["\u000D", "\u0308", "\uAC01"]),
+            ("\u000D\U0001F1E6", &["\u000D", "\U0001F1E6"]), ("\u000D\u0308\U0001F1E6",
+            &["\u000D", "\u0308", "\U0001F1E6"]), ("\u000D\u0378", &["\u000D", "\u0378"]),
+            ("\u000D\u0308\u0378", &["\u000D", "\u0308", "\u0378"]), ("\u000A\u0020", &["\u000A",
+            "\u0020"]), ("\u000A\u0308\u0020", &["\u000A", "\u0308", "\u0020"]), ("\u000A\u000D",
+            &["\u000A", "\u000D"]), ("\u000A\u0308\u000D", &["\u000A", "\u0308", "\u000D"]),
+            ("\u000A\u000A", &["\u000A", "\u000A"]), ("\u000A\u0308\u000A", &["\u000A", "\u0308",
+            "\u000A"]), ("\u000A\u0001", &["\u000A", "\u0001"]), ("\u000A\u0308\u0001",
+            &["\u000A", "\u0308", "\u0001"]), ("\u000A\u0300", &["\u000A", "\u0300"]),
+            ("\u000A\u0308\u0300", &["\u000A", "\u0308\u0300"]), ("\u000A\u0903", &["\u000A",
+            "\u0903"]), ("\u000A\u1100", &["\u000A", "\u1100"]), ("\u000A\u0308\u1100",
+            &["\u000A", "\u0308", "\u1100"]), ("\u000A\u1160", &["\u000A", "\u1160"]),
+            ("\u000A\u0308\u1160", &["\u000A", "\u0308", "\u1160"]), ("\u000A\u11A8", &["\u000A",
+            "\u11A8"]), ("\u000A\u0308\u11A8", &["\u000A", "\u0308", "\u11A8"]), ("\u000A\uAC00",
+            &["\u000A", "\uAC00"]), ("\u000A\u0308\uAC00", &["\u000A", "\u0308", "\uAC00"]),
+            ("\u000A\uAC01", &["\u000A", "\uAC01"]), ("\u000A\u0308\uAC01", &["\u000A", "\u0308",
+            "\uAC01"]), ("\u000A\U0001F1E6", &["\u000A", "\U0001F1E6"]),
+            ("\u000A\u0308\U0001F1E6", &["\u000A", "\u0308", "\U0001F1E6"]), ("\u000A\u0378",
+            &["\u000A", "\u0378"]), ("\u000A\u0308\u0378", &["\u000A", "\u0308", "\u0378"]),
+            ("\u0001\u0020", &["\u0001", "\u0020"]), ("\u0001\u0308\u0020", &["\u0001", "\u0308",
+            "\u0020"]), ("\u0001\u000D", &["\u0001", "\u000D"]), ("\u0001\u0308\u000D",
+            &["\u0001", "\u0308", "\u000D"]), ("\u0001\u000A", &["\u0001", "\u000A"]),
+            ("\u0001\u0308\u000A", &["\u0001", "\u0308", "\u000A"]), ("\u0001\u0001", &["\u0001",
+            "\u0001"]), ("\u0001\u0308\u0001", &["\u0001", "\u0308", "\u0001"]), ("\u0001\u0300",
+            &["\u0001", "\u0300"]), ("\u0001\u0308\u0300", &["\u0001", "\u0308\u0300"]),
+            ("\u0001\u0903", &["\u0001", "\u0903"]), ("\u0001\u1100", &["\u0001", "\u1100"]),
+            ("\u0001\u0308\u1100", &["\u0001", "\u0308", "\u1100"]), ("\u0001\u1160", &["\u0001",
+            "\u1160"]), ("\u0001\u0308\u1160", &["\u0001", "\u0308", "\u1160"]), ("\u0001\u11A8",
+            &["\u0001", "\u11A8"]), ("\u0001\u0308\u11A8", &["\u0001", "\u0308", "\u11A8"]),
+            ("\u0001\uAC00", &["\u0001", "\uAC00"]), ("\u0001\u0308\uAC00", &["\u0001", "\u0308",
+            "\uAC00"]), ("\u0001\uAC01", &["\u0001", "\uAC01"]), ("\u0001\u0308\uAC01",
+            &["\u0001", "\u0308", "\uAC01"]), ("\u0001\U0001F1E6", &["\u0001", "\U0001F1E6"]),
+            ("\u0001\u0308\U0001F1E6", &["\u0001", "\u0308", "\U0001F1E6"]), ("\u0001\u0378",
+            &["\u0001", "\u0378"]), ("\u0001\u0308\u0378", &["\u0001", "\u0308", "\u0378"]),
+            ("\u0300\u0020", &["\u0300", "\u0020"]), ("\u0300\u0308\u0020", &["\u0300\u0308",
+            "\u0020"]), ("\u0300\u000D", &["\u0300", "\u000D"]), ("\u0300\u0308\u000D",
+            &["\u0300\u0308", "\u000D"]), ("\u0300\u000A", &["\u0300", "\u000A"]),
+            ("\u0300\u0308\u000A", &["\u0300\u0308", "\u000A"]), ("\u0300\u0001", &["\u0300",
+            "\u0001"]), ("\u0300\u0308\u0001", &["\u0300\u0308", "\u0001"]), ("\u0300\u0300",
+            &["\u0300\u0300"]), ("\u0300\u0308\u0300", &["\u0300\u0308\u0300"]), ("\u0300\u1100",
+            &["\u0300", "\u1100"]), ("\u0300\u0308\u1100", &["\u0300\u0308", "\u1100"]),
+            ("\u0300\u1160", &["\u0300", "\u1160"]), ("\u0300\u0308\u1160", &["\u0300\u0308",
+            "\u1160"]), ("\u0300\u11A8", &["\u0300", "\u11A8"]), ("\u0300\u0308\u11A8",
+            &["\u0300\u0308", "\u11A8"]), ("\u0300\uAC00", &["\u0300", "\uAC00"]),
+            ("\u0300\u0308\uAC00", &["\u0300\u0308", "\uAC00"]), ("\u0300\uAC01", &["\u0300",
+            "\uAC01"]), ("\u0300\u0308\uAC01", &["\u0300\u0308", "\uAC01"]), ("\u0300\U0001F1E6",
+            &["\u0300", "\U0001F1E6"]), ("\u0300\u0308\U0001F1E6", &["\u0300\u0308",
+            "\U0001F1E6"]), ("\u0300\u0378", &["\u0300", "\u0378"]), ("\u0300\u0308\u0378",
+            &["\u0300\u0308", "\u0378"]), ("\u0903\u0020", &["\u0903", "\u0020"]),
+            ("\u0903\u0308\u0020", &["\u0903\u0308", "\u0020"]), ("\u0903\u000D", &["\u0903",
+            "\u000D"]), ("\u0903\u0308\u000D", &["\u0903\u0308", "\u000D"]), ("\u0903\u000A",
+            &["\u0903", "\u000A"]), ("\u0903\u0308\u000A", &["\u0903\u0308", "\u000A"]),
+            ("\u0903\u0001", &["\u0903", "\u0001"]), ("\u0903\u0308\u0001", &["\u0903\u0308",
+            "\u0001"]), ("\u0903\u0300", &["\u0903\u0300"]), ("\u0903\u0308\u0300",
+            &["\u0903\u0308\u0300"]), ("\u0903\u1100", &["\u0903", "\u1100"]),
+            ("\u0903\u0308\u1100", &["\u0903\u0308", "\u1100"]), ("\u0903\u1160", &["\u0903",
+            "\u1160"]), ("\u0903\u0308\u1160", &["\u0903\u0308", "\u1160"]), ("\u0903\u11A8",
+            &["\u0903", "\u11A8"]), ("\u0903\u0308\u11A8", &["\u0903\u0308", "\u11A8"]),
+            ("\u0903\uAC00", &["\u0903", "\uAC00"]), ("\u0903\u0308\uAC00", &["\u0903\u0308",
+            "\uAC00"]), ("\u0903\uAC01", &["\u0903", "\uAC01"]), ("\u0903\u0308\uAC01",
+            &["\u0903\u0308", "\uAC01"]), ("\u0903\U0001F1E6", &["\u0903", "\U0001F1E6"]),
+            ("\u0903\u0308\U0001F1E6", &["\u0903\u0308", "\U0001F1E6"]), ("\u0903\u0378",
+            &["\u0903", "\u0378"]), ("\u0903\u0308\u0378", &["\u0903\u0308", "\u0378"]),
+            ("\u1100\u0020", &["\u1100", "\u0020"]), ("\u1100\u0308\u0020", &["\u1100\u0308",
+            "\u0020"]), ("\u1100\u000D", &["\u1100", "\u000D"]), ("\u1100\u0308\u000D",
+            &["\u1100\u0308", "\u000D"]), ("\u1100\u000A", &["\u1100", "\u000A"]),
+            ("\u1100\u0308\u000A", &["\u1100\u0308", "\u000A"]), ("\u1100\u0001", &["\u1100",
+            "\u0001"]), ("\u1100\u0308\u0001", &["\u1100\u0308", "\u0001"]), ("\u1100\u0300",
+            &["\u1100\u0300"]), ("\u1100\u0308\u0300", &["\u1100\u0308\u0300"]), ("\u1100\u1100",
+            &["\u1100\u1100"]), ("\u1100\u0308\u1100", &["\u1100\u0308", "\u1100"]),
+            ("\u1100\u1160", &["\u1100\u1160"]), ("\u1100\u0308\u1160", &["\u1100\u0308",
+            "\u1160"]), ("\u1100\u11A8", &["\u1100", "\u11A8"]), ("\u1100\u0308\u11A8",
+            &["\u1100\u0308", "\u11A8"]), ("\u1100\uAC00", &["\u1100\uAC00"]),
+            ("\u1100\u0308\uAC00", &["\u1100\u0308", "\uAC00"]), ("\u1100\uAC01",
+            &["\u1100\uAC01"]), ("\u1100\u0308\uAC01", &["\u1100\u0308", "\uAC01"]),
+            ("\u1100\U0001F1E6", &["\u1100", "\U0001F1E6"]), ("\u1100\u0308\U0001F1E6",
+            &["\u1100\u0308", "\U0001F1E6"]), ("\u1100\u0378", &["\u1100", "\u0378"]),
+            ("\u1100\u0308\u0378", &["\u1100\u0308", "\u0378"]), ("\u1160\u0020", &["\u1160",
+            "\u0020"]), ("\u1160\u0308\u0020", &["\u1160\u0308", "\u0020"]), ("\u1160\u000D",
+            &["\u1160", "\u000D"]), ("\u1160\u0308\u000D", &["\u1160\u0308", "\u000D"]),
+            ("\u1160\u000A", &["\u1160", "\u000A"]), ("\u1160\u0308\u000A", &["\u1160\u0308",
+            "\u000A"]), ("\u1160\u0001", &["\u1160", "\u0001"]), ("\u1160\u0308\u0001",
+            &["\u1160\u0308", "\u0001"]), ("\u1160\u0300", &["\u1160\u0300"]),
+            ("\u1160\u0308\u0300", &["\u1160\u0308\u0300"]), ("\u1160\u1100", &["\u1160",
+            "\u1100"]), ("\u1160\u0308\u1100", &["\u1160\u0308", "\u1100"]), ("\u1160\u1160",
+            &["\u1160\u1160"]), ("\u1160\u0308\u1160", &["\u1160\u0308", "\u1160"]),
+            ("\u1160\u11A8", &["\u1160\u11A8"]), ("\u1160\u0308\u11A8", &["\u1160\u0308",
+            "\u11A8"]), ("\u1160\uAC00", &["\u1160", "\uAC00"]), ("\u1160\u0308\uAC00",
+            &["\u1160\u0308", "\uAC00"]), ("\u1160\uAC01", &["\u1160", "\uAC01"]),
+            ("\u1160\u0308\uAC01", &["\u1160\u0308", "\uAC01"]), ("\u1160\U0001F1E6", &["\u1160",
+            "\U0001F1E6"]), ("\u1160\u0308\U0001F1E6", &["\u1160\u0308", "\U0001F1E6"]),
+            ("\u1160\u0378", &["\u1160", "\u0378"]), ("\u1160\u0308\u0378", &["\u1160\u0308",
+            "\u0378"]), ("\u11A8\u0020", &["\u11A8", "\u0020"]), ("\u11A8\u0308\u0020",
+            &["\u11A8\u0308", "\u0020"]), ("\u11A8\u000D", &["\u11A8", "\u000D"]),
+            ("\u11A8\u0308\u000D", &["\u11A8\u0308", "\u000D"]), ("\u11A8\u000A", &["\u11A8",
+            "\u000A"]), ("\u11A8\u0308\u000A", &["\u11A8\u0308", "\u000A"]), ("\u11A8\u0001",
+            &["\u11A8", "\u0001"]), ("\u11A8\u0308\u0001", &["\u11A8\u0308", "\u0001"]),
+            ("\u11A8\u0300", &["\u11A8\u0300"]), ("\u11A8\u0308\u0300", &["\u11A8\u0308\u0300"]),
+            ("\u11A8\u1100", &["\u11A8", "\u1100"]), ("\u11A8\u0308\u1100", &["\u11A8\u0308",
+            "\u1100"]), ("\u11A8\u1160", &["\u11A8", "\u1160"]), ("\u11A8\u0308\u1160",
+            &["\u11A8\u0308", "\u1160"]), ("\u11A8\u11A8", &["\u11A8\u11A8"]),
+            ("\u11A8\u0308\u11A8", &["\u11A8\u0308", "\u11A8"]), ("\u11A8\uAC00", &["\u11A8",
+            "\uAC00"]), ("\u11A8\u0308\uAC00", &["\u11A8\u0308", "\uAC00"]), ("\u11A8\uAC01",
+            &["\u11A8", "\uAC01"]), ("\u11A8\u0308\uAC01", &["\u11A8\u0308", "\uAC01"]),
+            ("\u11A8\U0001F1E6", &["\u11A8", "\U0001F1E6"]), ("\u11A8\u0308\U0001F1E6",
+            &["\u11A8\u0308", "\U0001F1E6"]), ("\u11A8\u0378", &["\u11A8", "\u0378"]),
+            ("\u11A8\u0308\u0378", &["\u11A8\u0308", "\u0378"]), ("\uAC00\u0020", &["\uAC00",
+            "\u0020"]), ("\uAC00\u0308\u0020", &["\uAC00\u0308", "\u0020"]), ("\uAC00\u000D",
+            &["\uAC00", "\u000D"]), ("\uAC00\u0308\u000D", &["\uAC00\u0308", "\u000D"]),
+            ("\uAC00\u000A", &["\uAC00", "\u000A"]), ("\uAC00\u0308\u000A", &["\uAC00\u0308",
+            "\u000A"]), ("\uAC00\u0001", &["\uAC00", "\u0001"]), ("\uAC00\u0308\u0001",
+            &["\uAC00\u0308", "\u0001"]), ("\uAC00\u0300", &["\uAC00\u0300"]),
+            ("\uAC00\u0308\u0300", &["\uAC00\u0308\u0300"]), ("\uAC00\u1100", &["\uAC00",
+            "\u1100"]), ("\uAC00\u0308\u1100", &["\uAC00\u0308", "\u1100"]), ("\uAC00\u1160",
+            &["\uAC00\u1160"]), ("\uAC00\u0308\u1160", &["\uAC00\u0308", "\u1160"]),
+            ("\uAC00\u11A8", &["\uAC00\u11A8"]), ("\uAC00\u0308\u11A8", &["\uAC00\u0308",
+            "\u11A8"]), ("\uAC00\uAC00", &["\uAC00", "\uAC00"]), ("\uAC00\u0308\uAC00",
+            &["\uAC00\u0308", "\uAC00"]), ("\uAC00\uAC01", &["\uAC00", "\uAC01"]),
+            ("\uAC00\u0308\uAC01", &["\uAC00\u0308", "\uAC01"]), ("\uAC00\U0001F1E6", &["\uAC00",
+            "\U0001F1E6"]), ("\uAC00\u0308\U0001F1E6", &["\uAC00\u0308", "\U0001F1E6"]),
+            ("\uAC00\u0378", &["\uAC00", "\u0378"]), ("\uAC00\u0308\u0378", &["\uAC00\u0308",
+            "\u0378"]), ("\uAC01\u0020", &["\uAC01", "\u0020"]), ("\uAC01\u0308\u0020",
+            &["\uAC01\u0308", "\u0020"]), ("\uAC01\u000D", &["\uAC01", "\u000D"]),
+            ("\uAC01\u0308\u000D", &["\uAC01\u0308", "\u000D"]), ("\uAC01\u000A", &["\uAC01",
+            "\u000A"]), ("\uAC01\u0308\u000A", &["\uAC01\u0308", "\u000A"]), ("\uAC01\u0001",
+            &["\uAC01", "\u0001"]), ("\uAC01\u0308\u0001", &["\uAC01\u0308", "\u0001"]),
+            ("\uAC01\u0300", &["\uAC01\u0300"]), ("\uAC01\u0308\u0300", &["\uAC01\u0308\u0300"]),
+            ("\uAC01\u1100", &["\uAC01", "\u1100"]), ("\uAC01\u0308\u1100", &["\uAC01\u0308",
+            "\u1100"]), ("\uAC01\u1160", &["\uAC01", "\u1160"]), ("\uAC01\u0308\u1160",
+            &["\uAC01\u0308", "\u1160"]), ("\uAC01\u11A8", &["\uAC01\u11A8"]),
+            ("\uAC01\u0308\u11A8", &["\uAC01\u0308", "\u11A8"]), ("\uAC01\uAC00", &["\uAC01",
+            "\uAC00"]), ("\uAC01\u0308\uAC00", &["\uAC01\u0308", "\uAC00"]), ("\uAC01\uAC01",
+            &["\uAC01", "\uAC01"]), ("\uAC01\u0308\uAC01", &["\uAC01\u0308", "\uAC01"]),
+            ("\uAC01\U0001F1E6", &["\uAC01", "\U0001F1E6"]), ("\uAC01\u0308\U0001F1E6",
+            &["\uAC01\u0308", "\U0001F1E6"]), ("\uAC01\u0378", &["\uAC01", "\u0378"]),
+            ("\uAC01\u0308\u0378", &["\uAC01\u0308", "\u0378"]), ("\U0001F1E6\u0020",
+            &["\U0001F1E6", "\u0020"]), ("\U0001F1E6\u0308\u0020", &["\U0001F1E6\u0308",
+            "\u0020"]), ("\U0001F1E6\u000D", &["\U0001F1E6", "\u000D"]),
+            ("\U0001F1E6\u0308\u000D", &["\U0001F1E6\u0308", "\u000D"]), ("\U0001F1E6\u000A",
+            &["\U0001F1E6", "\u000A"]), ("\U0001F1E6\u0308\u000A", &["\U0001F1E6\u0308",
+            "\u000A"]), ("\U0001F1E6\u0001", &["\U0001F1E6", "\u0001"]),
+            ("\U0001F1E6\u0308\u0001", &["\U0001F1E6\u0308", "\u0001"]), ("\U0001F1E6\u0300",
+            &["\U0001F1E6\u0300"]), ("\U0001F1E6\u0308\u0300", &["\U0001F1E6\u0308\u0300"]),
+            ("\U0001F1E6\u1100", &["\U0001F1E6", "\u1100"]), ("\U0001F1E6\u0308\u1100",
+            &["\U0001F1E6\u0308", "\u1100"]), ("\U0001F1E6\u1160", &["\U0001F1E6", "\u1160"]),
+            ("\U0001F1E6\u0308\u1160", &["\U0001F1E6\u0308", "\u1160"]), ("\U0001F1E6\u11A8",
+            &["\U0001F1E6", "\u11A8"]), ("\U0001F1E6\u0308\u11A8", &["\U0001F1E6\u0308",
+            "\u11A8"]), ("\U0001F1E6\uAC00", &["\U0001F1E6", "\uAC00"]),
+            ("\U0001F1E6\u0308\uAC00", &["\U0001F1E6\u0308", "\uAC00"]), ("\U0001F1E6\uAC01",
+            &["\U0001F1E6", "\uAC01"]), ("\U0001F1E6\u0308\uAC01", &["\U0001F1E6\u0308",
+            "\uAC01"]), ("\U0001F1E6\U0001F1E6", &["\U0001F1E6\U0001F1E6"]),
+            ("\U0001F1E6\u0308\U0001F1E6", &["\U0001F1E6\u0308", "\U0001F1E6"]),
+            ("\U0001F1E6\u0378", &["\U0001F1E6", "\u0378"]), ("\U0001F1E6\u0308\u0378",
+            &["\U0001F1E6\u0308", "\u0378"]), ("\u0378\u0020", &["\u0378", "\u0020"]),
+            ("\u0378\u0308\u0020", &["\u0378\u0308", "\u0020"]), ("\u0378\u000D", &["\u0378",
+            "\u000D"]), ("\u0378\u0308\u000D", &["\u0378\u0308", "\u000D"]), ("\u0378\u000A",
+            &["\u0378", "\u000A"]), ("\u0378\u0308\u000A", &["\u0378\u0308", "\u000A"]),
+            ("\u0378\u0001", &["\u0378", "\u0001"]), ("\u0378\u0308\u0001", &["\u0378\u0308",
+            "\u0001"]), ("\u0378\u0300", &["\u0378\u0300"]), ("\u0378\u0308\u0300",
+            &["\u0378\u0308\u0300"]), ("\u0378\u1100", &["\u0378", "\u1100"]),
+            ("\u0378\u0308\u1100", &["\u0378\u0308", "\u1100"]), ("\u0378\u1160", &["\u0378",
+            "\u1160"]), ("\u0378\u0308\u1160", &["\u0378\u0308", "\u1160"]), ("\u0378\u11A8",
+            &["\u0378", "\u11A8"]), ("\u0378\u0308\u11A8", &["\u0378\u0308", "\u11A8"]),
+            ("\u0378\uAC00", &["\u0378", "\uAC00"]), ("\u0378\u0308\uAC00", &["\u0378\u0308",
+            "\uAC00"]), ("\u0378\uAC01", &["\u0378", "\uAC01"]), ("\u0378\u0308\uAC01",
+            &["\u0378\u0308", "\uAC01"]), ("\u0378\U0001F1E6", &["\u0378", "\U0001F1E6"]),
+            ("\u0378\u0308\U0001F1E6", &["\u0378\u0308", "\U0001F1E6"]), ("\u0378\u0378",
+            &["\u0378", "\u0378"]), ("\u0378\u0308\u0378", &["\u0378\u0308", "\u0378"]),
+            ("\u0061\U0001F1E6\u0062", &["\u0061", "\U0001F1E6", "\u0062"]),
+            ("\U0001F1F7\U0001F1FA", &["\U0001F1F7\U0001F1FA"]),
+            ("\U0001F1F7\U0001F1FA\U0001F1F8", &["\U0001F1F7\U0001F1FA\U0001F1F8"]),
+            ("\U0001F1F7\U0001F1FA\U0001F1F8\U0001F1EA",
+            &["\U0001F1F7\U0001F1FA\U0001F1F8\U0001F1EA"]),
+            ("\U0001F1F7\U0001F1FA\u200B\U0001F1F8\U0001F1EA", &["\U0001F1F7\U0001F1FA", "\u200B",
+            "\U0001F1F8\U0001F1EA"]), ("\U0001F1E6\U0001F1E7\U0001F1E8",
+            &["\U0001F1E6\U0001F1E7\U0001F1E8"]), ("\U0001F1E6\u200D\U0001F1E7\U0001F1E8",
+            &["\U0001F1E6\u200D", "\U0001F1E7\U0001F1E8"]),
+            ("\U0001F1E6\U0001F1E7\u200D\U0001F1E8", &["\U0001F1E6\U0001F1E7\u200D",
+            "\U0001F1E8"]), ("\u0020\u200D\u0646", &["\u0020\u200D", "\u0646"]),
+            ("\u0646\u200D\u0020", &["\u0646\u200D", "\u0020"]),
+        ];
+
+        let test_diff = [
+            ("\u0020\u0903", &["\u0020\u0903"], &["\u0020", "\u0903"]), ("\u0020\u0308\u0903",
+            &["\u0020\u0308\u0903"], &["\u0020\u0308", "\u0903"]), ("\u000D\u0308\u0903",
+            &["\u000D", "\u0308\u0903"], &["\u000D", "\u0308", "\u0903"]), ("\u000A\u0308\u0903",
+            &["\u000A", "\u0308\u0903"], &["\u000A", "\u0308", "\u0903"]), ("\u0001\u0308\u0903",
+            &["\u0001", "\u0308\u0903"], &["\u0001", "\u0308", "\u0903"]), ("\u0300\u0903",
+            &["\u0300\u0903"], &["\u0300", "\u0903"]), ("\u0300\u0308\u0903",
+            &["\u0300\u0308\u0903"], &["\u0300\u0308", "\u0903"]), ("\u0903\u0903",
+            &["\u0903\u0903"], &["\u0903", "\u0903"]), ("\u0903\u0308\u0903",
+            &["\u0903\u0308\u0903"], &["\u0903\u0308", "\u0903"]), ("\u1100\u0903",
+            &["\u1100\u0903"], &["\u1100", "\u0903"]), ("\u1100\u0308\u0903",
+            &["\u1100\u0308\u0903"], &["\u1100\u0308", "\u0903"]), ("\u1160\u0903",
+            &["\u1160\u0903"], &["\u1160", "\u0903"]), ("\u1160\u0308\u0903",
+            &["\u1160\u0308\u0903"], &["\u1160\u0308", "\u0903"]), ("\u11A8\u0903",
+            &["\u11A8\u0903"], &["\u11A8", "\u0903"]), ("\u11A8\u0308\u0903",
+            &["\u11A8\u0308\u0903"], &["\u11A8\u0308", "\u0903"]), ("\uAC00\u0903",
+            &["\uAC00\u0903"], &["\uAC00", "\u0903"]), ("\uAC00\u0308\u0903",
+            &["\uAC00\u0308\u0903"], &["\uAC00\u0308", "\u0903"]), ("\uAC01\u0903",
+            &["\uAC01\u0903"], &["\uAC01", "\u0903"]), ("\uAC01\u0308\u0903",
+            &["\uAC01\u0308\u0903"], &["\uAC01\u0308", "\u0903"]), ("\U0001F1E6\u0903",
+            &["\U0001F1E6\u0903"], &["\U0001F1E6", "\u0903"]), ("\U0001F1E6\u0308\u0903",
+            &["\U0001F1E6\u0308\u0903"], &["\U0001F1E6\u0308", "\u0903"]), ("\u0378\u0903",
+            &["\u0378\u0903"], &["\u0378", "\u0903"]), ("\u0378\u0308\u0903",
+            &["\u0378\u0308\u0903"], &["\u0378\u0308", "\u0903"]),
+        ];
+
+        for &(s, g) in test_same.iter() {
+            // test forward iterator
+            assert!(order::equals(s.graphemes(true), g.iter().map(|&x| x)));
+            assert!(order::equals(s.graphemes(false), g.iter().map(|&x| x)));
+
+            // test reverse iterator
+            assert!(order::equals(s.graphemes(true).rev(), g.iter().rev().map(|&x| x)));
+            assert!(order::equals(s.graphemes(false).rev(), g.iter().rev().map(|&x| x)));
+        }
+
+        for &(s, gt, gf) in test_diff.iter() {
+            // test forward iterator
+            assert!(order::equals(s.graphemes(true), gt.iter().map(|&x| x)));
+            assert!(order::equals(s.graphemes(false), gf.iter().map(|&x| x)));
+
+            // test reverse iterator
+            assert!(order::equals(s.graphemes(true).rev(), gt.iter().rev().map(|&x| x)));
+            assert!(order::equals(s.graphemes(false).rev(), gf.iter().rev().map(|&x| x)));
+        }
+
+        // test the indices iterators
+        let s = "a̐éö̲\r\n";
+        let gr_inds = s.grapheme_indices(true).collect::<Vec<(uint, &str)>>();
+        assert_eq!(gr_inds.as_slice(), &[(0u, "a̐"), (3, "é"), (6, "ö̲"), (11, "\r\n")]);
+        let gr_inds = s.grapheme_indices(true).rev().collect::<Vec<(uint, &str)>>();
+        assert_eq!(gr_inds.as_slice(), &[(11, "\r\n"), (6, "ö̲"), (3, "é"), (0u, "a̐")]);
+        let mut gr_inds = s.grapheme_indices(true);
+        let e1 = gr_inds.size_hint();
+        assert_eq!(e1, (1, Some(13)));
+        let c = gr_inds.count();
+        assert_eq!(c, 4);
+        let e2 = gr_inds.size_hint();
+        assert_eq!(e2, (0, Some(0)));
+
+        // make sure the reverse iterator does the right thing with "\n" at beginning of string
+        let s = "\n\r\n\r";
+        let gr = s.graphemes(true).rev().collect::<Vec<&str>>();
+        assert_eq!(gr.as_slice(), &["\r", "\r\n", "\n"]);
     }
 
     #[test]
@@ -2041,10 +2182,10 @@ mod tests {
             v.iter().map(|x| x.len()).sum()
         }
 
-        let s = "01234".to_string();
+        let s = String::from_str("01234");
         assert_eq!(5, sum_len(["012", "", "34"]));
-        assert_eq!(5, sum_len(["01".to_string(), "2".to_string(),
-                               "34".to_string(), "".to_string()]));
+        assert_eq!(5, sum_len([String::from_str("01"), String::from_str("2"),
+                               String::from_str("34"), String::from_str("")]));
         assert_eq!(5, sum_len([s.as_slice()]));
     }
 
@@ -2061,74 +2202,22 @@ mod tests {
     }
 
     #[test]
-    fn test_str_from_utf8_owned() {
-        let xs = Vec::from_slice(b"hello");
-        assert_eq!(from_utf8_owned(xs), Ok("hello".to_string()));
-
-        let xs = Vec::from_slice("ศไทย中华Việt Nam".as_bytes());
-        assert_eq!(from_utf8_owned(xs), Ok("ศไทย中华Việt Nam".to_string()));
-
-        let xs = Vec::from_slice(b"hello\xFF");
-        assert_eq!(from_utf8_owned(xs),
-                   Err(Vec::from_slice(b"hello\xFF")));
-    }
-
-    #[test]
-    fn test_str_from_utf8_lossy() {
-        let xs = b"hello";
-        assert_eq!(from_utf8_lossy(xs), Slice("hello"));
-
-        let xs = "ศไทย中华Việt Nam".as_bytes();
-        assert_eq!(from_utf8_lossy(xs), Slice("ศไทย中华Việt Nam"));
-
-        let xs = b"Hello\xC2 There\xFF Goodbye";
-        assert_eq!(from_utf8_lossy(xs), Owned("Hello\uFFFD There\uFFFD Goodbye".to_string()));
-
-        let xs = b"Hello\xC0\x80 There\xE6\x83 Goodbye";
-        assert_eq!(from_utf8_lossy(xs), Owned("Hello\uFFFD\uFFFD There\uFFFD Goodbye".to_string()));
-
-        let xs = b"\xF5foo\xF5\x80bar";
-        assert_eq!(from_utf8_lossy(xs), Owned("\uFFFDfoo\uFFFD\uFFFDbar".to_string()));
-
-        let xs = b"\xF1foo\xF1\x80bar\xF1\x80\x80baz";
-        assert_eq!(from_utf8_lossy(xs), Owned("\uFFFDfoo\uFFFDbar\uFFFDbaz".to_string()));
-
-        let xs = b"\xF4foo\xF4\x80bar\xF4\xBFbaz";
-        assert_eq!(from_utf8_lossy(xs), Owned("\uFFFDfoo\uFFFDbar\uFFFD\uFFFDbaz".to_string()));
-
-        let xs = b"\xF0\x80\x80\x80foo\xF0\x90\x80\x80bar";
-        assert_eq!(from_utf8_lossy(xs), Owned("\uFFFD\uFFFD\uFFFD\uFFFD\
-                                               foo\U00010000bar".to_string()));
-
-        // surrogates
-        let xs = b"\xED\xA0\x80foo\xED\xBF\xBFbar";
-        assert_eq!(from_utf8_lossy(xs), Owned("\uFFFD\uFFFD\uFFFDfoo\
-                                               \uFFFD\uFFFD\uFFFDbar".to_string()));
-    }
-
-    #[test]
-    fn test_from_str() {
-      let owned: Option<::std::string::String> = from_str("string");
-      assert_eq!(owned.as_ref().map(|s| s.as_slice()), Some("string"));
-    }
-
-    #[test]
     fn test_maybe_owned_traits() {
         let s = Slice("abcde");
         assert_eq!(s.len(), 5);
         assert_eq!(s.as_slice(), "abcde");
-        assert_eq!(s.to_str().as_slice(), "abcde");
+        assert_eq!(String::from_str(s.as_slice()).as_slice(), "abcde");
         assert_eq!(format!("{}", s).as_slice(), "abcde");
-        assert!(s.lt(&Owned("bcdef".to_string())));
+        assert!(s.lt(&Owned(String::from_str("bcdef"))));
         assert_eq!(Slice(""), Default::default());
 
-        let o = Owned("abcde".to_string());
+        let o = Owned(String::from_str("abcde"));
         assert_eq!(o.len(), 5);
         assert_eq!(o.as_slice(), "abcde");
-        assert_eq!(o.to_str().as_slice(), "abcde");
+        assert_eq!(String::from_str(o.as_slice()).as_slice(), "abcde");
         assert_eq!(format!("{}", o).as_slice(), "abcde");
         assert!(o.lt(&Slice("bcdef")));
-        assert_eq!(Owned("".to_string()), Default::default());
+        assert_eq!(Owned(String::from_str("")), Default::default());
 
         assert!(s.cmp(&o) == Equal);
         assert!(s.equiv(&o));
@@ -2143,46 +2232,59 @@ mod tests {
         assert!(s.is_slice());
         assert!(!s.is_owned());
 
-        let o = Owned("abcde".to_string());
+        let o = Owned(String::from_str("abcde"));
         assert!(!o.is_slice());
         assert!(o.is_owned());
     }
 
     #[test]
     fn test_maybe_owned_clone() {
-        assert_eq!(Owned("abcde".to_string()), Slice("abcde").clone());
-        assert_eq!(Owned("abcde".to_string()), Owned("abcde".to_string()).clone());
+        assert_eq!(Owned(String::from_str("abcde")), Slice("abcde").clone());
+        assert_eq!(Owned(String::from_str("abcde")), Owned(String::from_str("abcde")).clone());
         assert_eq!(Slice("abcde"), Slice("abcde").clone());
-        assert_eq!(Slice("abcde"), Owned("abcde".to_string()).clone());
+        assert_eq!(Slice("abcde"), Owned(String::from_str("abcde")).clone());
     }
 
     #[test]
     fn test_maybe_owned_into_string() {
-        assert_eq!(Slice("abcde").into_string(), "abcde".to_string());
-        assert_eq!(Owned("abcde".to_string()).into_string(), "abcde".to_string());
+        assert_eq!(Slice("abcde").into_string(), String::from_str("abcde"));
+        assert_eq!(Owned(String::from_str("abcde")).into_string(),
+                   String::from_str("abcde"));
     }
 
     #[test]
     fn test_into_maybe_owned() {
         assert_eq!("abcde".into_maybe_owned(), Slice("abcde"));
-        assert_eq!(("abcde".to_string()).into_maybe_owned(), Slice("abcde"));
-        assert_eq!("abcde".into_maybe_owned(), Owned("abcde".to_string()));
-        assert_eq!(("abcde".to_string()).into_maybe_owned(), Owned("abcde".to_string()));
+        assert_eq!((String::from_str("abcde")).into_maybe_owned(), Slice("abcde"));
+        assert_eq!("abcde".into_maybe_owned(), Owned(String::from_str("abcde")));
+        assert_eq!((String::from_str("abcde")).into_maybe_owned(),
+                   Owned(String::from_str("abcde")));
     }
 }
 
 #[cfg(test)]
 mod bench {
     use test::Bencher;
+    use test::black_box;
     use super::*;
-    use std::prelude::*;
+    use std::option::{None, Some};
+    use std::iter::{Iterator, DoubleEndedIterator};
+    use std::collections::Collection;
 
     #[bench]
     fn char_iterator(b: &mut Bencher) {
         let s = "ศไทย中华Việt Nam; Mary had a little lamb, Little lamb";
-        let len = s.char_len();
 
-        b.iter(|| assert_eq!(s.chars().count(), len));
+        b.iter(|| s.chars().count());
+    }
+
+    #[bench]
+    fn char_iterator_for(b: &mut Bencher) {
+        let s = "ศไทย中华Việt Nam; Mary had a little lamb, Little lamb";
+
+        b.iter(|| {
+            for ch in s.chars() { black_box(ch) }
+        });
     }
 
     #[bench]
@@ -2193,17 +2295,24 @@ mod bench {
         Mary had a little lamb, Little lamb
         Mary had a little lamb, Little lamb
         Mary had a little lamb, Little lamb";
-        let len = s.char_len();
 
-        b.iter(|| assert_eq!(s.chars().count(), len));
+        b.iter(|| s.chars().count());
     }
 
     #[bench]
     fn char_iterator_rev(b: &mut Bencher) {
         let s = "ศไทย中华Việt Nam; Mary had a little lamb, Little lamb";
-        let len = s.char_len();
 
-        b.iter(|| assert_eq!(s.chars().rev().count(), len));
+        b.iter(|| s.chars().rev().count());
+    }
+
+    #[bench]
+    fn char_iterator_rev_for(b: &mut Bencher) {
+        let s = "ศไทย中华Việt Nam; Mary had a little lamb, Little lamb";
+
+        b.iter(|| {
+            for ch in s.chars().rev() { black_box(ch) }
+        });
     }
 
     #[bench]
@@ -2313,42 +2422,6 @@ mod bench {
         assert_eq!(100, s.len());
         b.iter(|| {
             is_utf8(s)
-        });
-    }
-
-    #[bench]
-    fn from_utf8_lossy_100_ascii(b: &mut Bencher) {
-        let s = b"Hello there, the quick brown fox jumped over the lazy dog! \
-                  Lorem ipsum dolor sit amet, consectetur. ";
-
-        assert_eq!(100, s.len());
-        b.iter(|| {
-            let _ = from_utf8_lossy(s);
-        });
-    }
-
-    #[bench]
-    fn from_utf8_lossy_100_multibyte(b: &mut Bencher) {
-        let s = "𐌀𐌖𐌋𐌄𐌑𐌉ปรدولة الكويتทศไทย中华𐍅𐌿𐌻𐍆𐌹𐌻𐌰".as_bytes();
-        assert_eq!(100, s.len());
-        b.iter(|| {
-            let _ = from_utf8_lossy(s);
-        });
-    }
-
-    #[bench]
-    fn from_utf8_lossy_invalid(b: &mut Bencher) {
-        let s = b"Hello\xC0\x80 There\xE6\x83 Goodbye";
-        b.iter(|| {
-            let _ = from_utf8_lossy(s);
-        });
-    }
-
-    #[bench]
-    fn from_utf8_lossy_100_invalid(b: &mut Bencher) {
-        let s = Vec::from_elem(100, 0xF5u8);
-        b.iter(|| {
-            let _ = from_utf8_lossy(s.as_slice());
         });
     }
 

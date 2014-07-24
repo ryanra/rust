@@ -31,7 +31,7 @@ impl Logger for MyWriter {
 }
 
 #[start]
-fn start(argc: int, argv: **u8) -> int {
+fn start(argc: int, argv: *const *const u8) -> int {
     native::start(argc, argv, proc() {
         main();
     })
@@ -45,7 +45,7 @@ fn main() {
         debug!("debug");
         info!("info");
     });
-    let s = r.read_to_str().unwrap();
+    let s = r.read_to_string().unwrap();
     assert!(s.as_slice().contains("info"));
     assert!(!s.as_slice().contains("debug"));
 }

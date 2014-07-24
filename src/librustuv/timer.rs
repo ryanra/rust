@@ -18,7 +18,7 @@ use uvio::UvIoFactory;
 use uvll;
 
 pub struct TimerWatcher {
-    pub handle: *uvll::uv_timer_t,
+    pub handle: *mut uvll::uv_timer_t,
     home: HomeHandle,
     action: Option<NextAction>,
     blocker: Option<BlockedTask>,
@@ -60,7 +60,7 @@ impl TimerWatcher {
         assert_eq!(unsafe { uvll::uv_timer_stop(self.handle) }, 0)
     }
 
-    pub unsafe fn set_data<T>(&mut self, data: *T) {
+    pub unsafe fn set_data<T>(&mut self, data: *mut T) {
         uvll::set_data_for_uv_handle(self.handle, data);
     }
 }
@@ -70,14 +70,14 @@ impl HomingIO for TimerWatcher {
 }
 
 impl UvHandle<uvll::uv_timer_t> for TimerWatcher {
-    fn uv_handle(&self) -> *uvll::uv_timer_t { self.handle }
+    fn uv_handle(&self) -> *mut uvll::uv_timer_t { self.handle }
 }
 
 impl RtioTimer for TimerWatcher {
     fn sleep(&mut self, msecs: u64) {
         // As with all of the below functions, we must be extra careful when
         // destroying the previous action. If the previous action was a channel,
-        // destroying it could invoke a context switch. For these situtations,
+        // destroying it could invoke a context switch. For these situations,
         // we must temporarily un-home ourselves, then destroy the action, and
         // then re-home again.
         let missile = self.fire_homing_missile();
@@ -128,7 +128,7 @@ impl RtioTimer for TimerWatcher {
     }
 }
 
-extern fn timer_cb(handle: *uvll::uv_timer_t) {
+extern fn timer_cb(handle: *mut uvll::uv_timer_t) {
     let _f = ForbidSwitch::new("timer callback can't switch");
     let timer: &mut TimerWatcher = unsafe { UvHandle::from_uv_handle(&handle) };
 

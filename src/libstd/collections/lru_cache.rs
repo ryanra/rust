@@ -45,11 +45,11 @@ use iter::{range, Iterator};
 use mem;
 use ops::Drop;
 use option::{Some, None, Option};
-use owned::Box;
+use boxed::Box;
 use ptr;
 use result::{Ok, Err};
 
-struct KeyRef<K> { k: *K }
+struct KeyRef<K> { k: *const K }
 
 struct LruEntry<K, V> {
     next: *mut LruEntry<K, V>,
@@ -319,20 +319,20 @@ mod tests {
     }
 
     #[test]
-    fn test_to_str() {
+    fn test_to_string() {
         let mut cache: LruCache<int, int> = LruCache::new(3);
         cache.put(1, 10);
         cache.put(2, 20);
         cache.put(3, 30);
-        assert_eq!(cache.to_str(), "{3: 30, 2: 20, 1: 10}".to_string());
+        assert_eq!(cache.to_string(), "{3: 30, 2: 20, 1: 10}".to_string());
         cache.put(2, 22);
-        assert_eq!(cache.to_str(), "{2: 22, 3: 30, 1: 10}".to_string());
+        assert_eq!(cache.to_string(), "{2: 22, 3: 30, 1: 10}".to_string());
         cache.put(6, 60);
-        assert_eq!(cache.to_str(), "{6: 60, 2: 22, 3: 30}".to_string());
+        assert_eq!(cache.to_string(), "{6: 60, 2: 22, 3: 30}".to_string());
         cache.get(&3);
-        assert_eq!(cache.to_str(), "{3: 30, 6: 60, 2: 22}".to_string());
+        assert_eq!(cache.to_string(), "{3: 30, 6: 60, 2: 22}".to_string());
         cache.change_capacity(2);
-        assert_eq!(cache.to_str(), "{3: 30, 6: 60}".to_string());
+        assert_eq!(cache.to_string(), "{3: 30, 6: 60}".to_string());
     }
 
     #[test]
@@ -343,6 +343,6 @@ mod tests {
         cache.clear();
         assert!(cache.get(&1).is_none());
         assert!(cache.get(&2).is_none());
-        assert_eq!(cache.to_str(), "{}".to_string());
+        assert_eq!(cache.to_string(), "{}".to_string());
     }
 }

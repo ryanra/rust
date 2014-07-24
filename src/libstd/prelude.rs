@@ -37,12 +37,15 @@
 //! particularly useful standalone functions, like `from_str`, `range`, and
 //! `drop`, `spawn`, and `channel`.
 
+#![experimental]
+
 // Reexported core operators
 #[doc(no_inline)] pub use kinds::{Copy, Send, Sized, Share};
 #[doc(no_inline)] pub use ops::{Add, Sub, Mul, Div, Rem, Neg, Not};
 #[doc(no_inline)] pub use ops::{BitAnd, BitOr, BitXor};
 #[doc(no_inline)] pub use ops::{Drop, Deref, DerefMut};
-#[doc(no_inline)] pub use ops::{Shl, Shr, Index};
+#[doc(no_inline)] pub use ops::{Shl, Shr};
+#[doc(no_inline)] pub use ops::{Index, IndexMut};
 #[doc(no_inline)] pub use option::{Option, Some, None};
 #[doc(no_inline)] pub use result::{Result, Ok, Err};
 
@@ -56,7 +59,7 @@
 #[doc(no_inline)] pub use ascii::{Ascii, AsciiCast, OwnedAsciiCast, AsciiStr};
 #[doc(no_inline)] pub use ascii::IntoBytes;
 #[cfg(not(kernel))] #[doc(no_inline)] pub use c_str::ToCStr;
-#[doc(no_inline)] pub use char::Char;
+#[doc(no_inline)] pub use char::{Char, UnicodeChar};
 #[doc(no_inline)] pub use clone::Clone;
 #[doc(no_inline)] pub use cmp::{PartialEq, PartialOrd, Eq, Ord};
 #[doc(no_inline)] pub use cmp::{Ordering, Less, Equal, Greater, Equiv};
@@ -69,13 +72,13 @@
 #[doc(no_inline)] pub use num::{Num, NumCast, CheckedAdd, CheckedSub, CheckedMul, CheckedDiv};
 #[doc(no_inline)] pub use num::{Signed, Unsigned, Primitive, Int, Float};
 #[doc(no_inline)] pub use num::{FloatMath, ToPrimitive, FromPrimitive};
-#[doc(no_inline)] pub use owned::Box;
+#[doc(no_inline)] pub use boxed::Box;
 #[cfg(not(kernel))] #[doc(no_inline)] pub use path::{GenericPath, Path, PosixPath, WindowsPath};
 #[doc(no_inline)] pub use ptr::RawPtr;
 #[doc(no_inline)] pub use io::{Buffer, Writer, Reader, Seek};
 #[doc(no_inline)] pub use str::{Str, StrVector, StrSlice, OwnedStr};
-#[doc(no_inline)] pub use str::{IntoMaybeOwned, StrAllocating};
-#[doc(no_inline)] pub use to_str::{ToStr, IntoStr};
+#[doc(no_inline)] pub use str::{IntoMaybeOwned, StrAllocating, UnicodeStrSlice};
+#[doc(no_inline)] pub use to_str::{ToString, IntoStr};
 #[doc(no_inline)] pub use tuple::{Tuple1, Tuple2, Tuple3, Tuple4};
 #[doc(no_inline)] pub use tuple::{Tuple5, Tuple6, Tuple7, Tuple8};
 #[doc(no_inline)] pub use tuple::{Tuple9, Tuple10, Tuple11, Tuple12};

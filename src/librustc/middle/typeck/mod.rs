@@ -97,6 +97,9 @@ pub enum MethodOrigin {
     // fully statically resolved method
     MethodStatic(ast::DefId),
 
+    // fully statically resolved unboxed closure invocation
+    MethodStaticUnboxedClosure(ast::DefId),
+
     // method invoked on a type parameter with a bounded trait
     MethodParam(MethodParam),
 
@@ -216,9 +219,9 @@ pub type vtable_res = VecPerParamSpace<vtable_param_res>;
 #[deriving(Clone)]
 pub enum vtable_origin {
     /*
-      Statically known vtable. def_id gives the class or impl item
+      Statically known vtable. def_id gives the impl item
       from whence comes the vtable, and tys are the type substs.
-      vtable_res is the vtable itself
+      vtable_res is the vtable itself.
      */
     vtable_static(ast::DefId, subst::Substs, vtable_res),
 
@@ -231,6 +234,12 @@ pub enum vtable_origin {
       and the second is the bound number (identifying baz)
      */
     vtable_param(param_index, uint),
+
+    /*
+      Vtable automatically generated for an unboxed closure. The def ID is the
+      ID of the closure expression.
+     */
+    vtable_unboxed_closure(ast::DefId),
 
     /*
       Asked to determine the vtable for ty_err. This is the value used
@@ -256,6 +265,10 @@ impl Repr for vtable_origin {
                 format!("vtable_param({:?}, {:?})", x, y)
             }
 
+            vtable_unboxed_closure(def_id) => {
+                format!("vtable_unboxed_closure({})", def_id)
+            }
+
             vtable_error => {
                 format!("vtable_error")
             }
@@ -276,7 +289,7 @@ pub struct CrateCtxt<'a> {
 
 // Functions that write types into the node type table
 pub fn write_ty_to_tcx(tcx: &ty::ctxt, node_id: ast::NodeId, ty: ty::t) {
-    debug!("write_ty_to_tcx({}, {})", node_id, ppaux::ty_to_str(tcx, ty));
+    debug!("write_ty_to_tcx({}, {})", node_id, ppaux::ty_to_string(tcx, ty));
     assert!(!ty::type_needs_infer(ty));
     tcx.node_types.borrow_mut().insert(node_id as uint, ty);
 }
@@ -359,9 +372,8 @@ fn check_main_fn_ty(ccx: &CrateCtxt,
                     match it.node {
                         ast::ItemFn(_, _, _, ref ps, _)
                         if ps.is_parameterized() => {
-                            tcx.sess.span_err(
-                                main_span,
-                                "main function is not allowed to have type parameters");
+                            span_err!(ccx.tcx.sess, main_span, E0131,
+                                      "main function is not allowed to have type parameters");
                             return;
                         }
                         _ => ()
@@ -383,14 +395,14 @@ fn check_main_fn_ty(ccx: &CrateCtxt,
             require_same_types(tcx, None, false, main_span, main_t, se_ty,
                 || {
                     format!("main function expects type: `{}`",
-                            ppaux::ty_to_str(ccx.tcx, se_ty))
+                            ppaux::ty_to_string(ccx.tcx, se_ty))
                 });
         }
         _ => {
             tcx.sess.span_bug(main_span,
                               format!("main has a non-function type: found \
                                        `{}`",
-                                      ppaux::ty_to_str(tcx,
+                                      ppaux::ty_to_string(tcx,
                                                        main_t)).as_slice());
         }
     }
@@ -408,9 +420,8 @@ fn check_start_fn_ty(ccx: &CrateCtxt,
                     match it.node {
                         ast::ItemFn(_,_,_,ref ps,_)
                         if ps.is_parameterized() => {
-                            tcx.sess.span_err(
-                                start_span,
-                                "start function is not allowed to have type parameters");
+                            span_err!(tcx.sess, start_span, E0132,
+                                      "start function is not allowed to have type parameters");
                             return;
                         }
                         _ => ()
@@ -436,7 +447,7 @@ fn check_start_fn_ty(ccx: &CrateCtxt,
             require_same_types(tcx, None, false, start_span, start_t, se_ty,
                 || {
                     format!("start function expects type: `{}`",
-                            ppaux::ty_to_str(ccx.tcx, se_ty))
+                            ppaux::ty_to_string(ccx.tcx, se_ty))
                 });
 
         }
@@ -444,7 +455,7 @@ fn check_start_fn_ty(ccx: &CrateCtxt,
             tcx.sess.span_bug(start_span,
                               format!("start has a non-function type: found \
                                        `{}`",
-                                      ppaux::ty_to_str(tcx,
+                                      ppaux::ty_to_string(tcx,
                                                        start_t)).as_slice());
         }
     }

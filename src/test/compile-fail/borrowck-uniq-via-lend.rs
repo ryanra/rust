@@ -12,14 +12,14 @@
 fn borrow(_v: &int) {}
 
 fn local() {
-    let mut v = box 3;
-    borrow(v);
+    let mut v = box 3i;
+    borrow(&*v);
 }
 
 fn local_rec() {
     struct F { f: Box<int> }
     let mut v = F {f: box 3};
-    borrow(v.f);
+    borrow(&*v.f);
 }
 
 fn local_recs() {
@@ -27,34 +27,34 @@ fn local_recs() {
     struct G { g: H }
     struct H { h: Box<int> }
     let mut v = F {f: G {g: H {h: box 3}}};
-    borrow(v.f.g.h);
+    borrow(&*v.f.g.h);
 }
 
 fn aliased_imm() {
-    let mut v = box 3;
+    let mut v = box 3i;
     let _w = &v;
-    borrow(v);
+    borrow(&*v);
 }
 
 fn aliased_mut() {
-    let mut v = box 3;
+    let mut v = box 3i;
     let _w = &mut v;
-    borrow(v); //~ ERROR cannot borrow `*v`
+    borrow(&*v); //~ ERROR cannot borrow `*v`
 }
 
 fn aliased_other() {
-    let mut v = box 3;
-    let mut w = box 4;
+    let mut v = box 3i;
+    let mut w = box 4i;
     let _x = &mut w;
-    borrow(v);
+    borrow(&*v);
 }
 
 fn aliased_other_reassign() {
-    let mut v = box 3;
-    let mut w = box 4;
+    let mut v = box 3i;
+    let mut w = box 4i;
     let mut _x = &mut w;
     _x = &mut v;
-    borrow(v); //~ ERROR cannot borrow `*v`
+    borrow(&*v); //~ ERROR cannot borrow `*v`
 }
 
 fn main() {

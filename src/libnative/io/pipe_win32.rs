@@ -152,7 +152,7 @@ impl Drop for Inner {
     }
 }
 
-unsafe fn pipe(name: *u16, init: bool) -> libc::HANDLE {
+unsafe fn pipe(name: *const u16, init: bool) -> libc::HANDLE {
     libc::CreateNamedPipeW(
         name,
         libc::PIPE_ACCESS_DUPLEX |
@@ -210,7 +210,7 @@ pub struct UnixStream {
 }
 
 impl UnixStream {
-    fn try_connect(p: *u16) -> Option<libc::HANDLE> {
+    fn try_connect(p: *const u16) -> Option<libc::HANDLE> {
         // Note that most of this is lifted from the libuv implementation.
         // The idea is that if we fail to open a pipe in read/write mode
         // that we try afterwards in just read or just write
@@ -376,7 +376,7 @@ impl rtio::RtioPipe for UnixStream {
         if ret != 0 { return Ok(bytes_read as uint) }
 
         // If our errno doesn't say that the I/O is pending, then we hit some
-        // legitimate error and reeturn immediately.
+        // legitimate error and return immediately.
         if os::errno() != libc::ERROR_IO_PENDING as uint {
             return Err(super::last_error())
         }
@@ -479,7 +479,7 @@ impl rtio::RtioPipe for UnixStream {
                             Err(IoError {
                                 code: libc::ERROR_OPERATION_ABORTED as uint,
                                 extra: amt,
-                                detail: Some("short write during write".to_str()),
+                                detail: Some("short write during write".to_string()),
                             })
                         } else {
                             Err(util::timeout("write timed out"))

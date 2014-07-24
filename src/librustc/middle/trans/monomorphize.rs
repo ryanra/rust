@@ -10,7 +10,7 @@
 
 use back::link::exported_name;
 use driver::session;
-use lib::llvm::ValueRef;
+use llvm::ValueRef;
 use middle::subst;
 use middle::subst::Subst;
 use middle::trans::base::{set_llvm_fn_attrs, set_inline_hint};
@@ -18,7 +18,6 @@ use middle::trans::base::{trans_enum_variant, push_ctxt, get_item_val};
 use middle::trans::base::{trans_fn, decl_internal_rust_fn};
 use middle::trans::base;
 use middle::trans::common::*;
-use middle::trans::intrinsic;
 use middle::ty;
 use middle::typeck;
 use util::ppaux::Repr;
@@ -26,7 +25,7 @@ use util::ppaux::Repr;
 use syntax::abi;
 use syntax::ast;
 use syntax::ast_map;
-use syntax::ast_util::local_def;
+use syntax::ast_util::{local_def, PostExpansionMethod};
 use std::hash::{sip, Hash};
 
 pub fn monomorphic_fn(ccx: &CrateContext,
@@ -129,9 +128,7 @@ pub fn monomorphic_fn(ccx: &CrateContext,
         hash_id.hash(&mut state);
         mono_ty.hash(&mut state);
 
-        exported_name(path,
-                      format!("h{}", state.result()).as_slice(),
-                      ccx.link_meta.crateid.version_or_default())
+        exported_name(path, format!("h{}", state.result()).as_slice())
     });
     debug!("monomorphize_fn mangled to {}", s);
 
@@ -160,17 +157,6 @@ pub fn monomorphic_fn(ccx: &CrateContext,
               }
             }
         }
-        ast_map::NodeForeignItem(i) => {
-            let simple = intrinsic::get_simple_intrinsic(ccx, &*i);
-            match simple {
-                Some(decl) => decl,
-                None => {
-                    let d = mk_lldecl();
-                    intrinsic::trans_intrinsic(ccx, d, &*i, &psubsts, ref_id);
-                    d
-                }
-            }
-        }
         ast_map::NodeVariant(v) => {
             let parent = ccx.tcx.map.get_parent(fn_id.node);
             let tvs = ty::enum_variants(ccx.tcx(), local_def(parent));
@@ -195,7 +181,7 @@ pub fn monomorphic_fn(ccx: &CrateContext,
         ast_map::NodeMethod(mth) => {
             let d = mk_lldecl();
             set_llvm_fn_attrs(mth.attrs.as_slice(), d);
-            trans_fn(ccx, &*mth.decl, &*mth.body, d, &psubsts, mth.id, []);
+            trans_fn(ccx, &*mth.pe_fn_decl(), &*mth.pe_body(), d, &psubsts, mth.id, []);
             d
         }
         ast_map::NodeTraitMethod(method) => {
@@ -203,7 +189,8 @@ pub fn monomorphic_fn(ccx: &CrateContext,
                 ast::Provided(mth) => {
                     let d = mk_lldecl();
                     set_llvm_fn_attrs(mth.attrs.as_slice(), d);
-                    trans_fn(ccx, &*mth.decl, &*mth.body, d, &psubsts, mth.id, []);
+                    trans_fn(ccx, &*mth.pe_fn_decl(), &*mth.pe_body(), d,
+                             &psubsts, mth.id, []);
                     d
                 }
                 _ => {
@@ -225,6 +212,7 @@ pub fn monomorphic_fn(ccx: &CrateContext,
         }
 
         // Ugh -- but this ensures any new variants won't be forgotten
+        ast_map::NodeForeignItem(..) |
         ast_map::NodeLifetime(..) |
         ast_map::NodeExpr(..) |
         ast_map::NodeStmt(..) |
@@ -263,6 +251,13 @@ pub fn make_vtable_id(_ccx: &CrateContext,
             MonoId {
                 def: impl_id,
                 params: substs.types.clone()
+            }
+        }
+
+        &typeck::vtable_unboxed_closure(def_id) => {
+            MonoId {
+                def: def_id,
+                params: subst::VecPerParamSpace::empty(),
             }
         }
 

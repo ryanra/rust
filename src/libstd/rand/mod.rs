@@ -73,6 +73,8 @@ println!("{}", tuple)
 ```
 */
 
+#![experimental]
+
 use cell::RefCell;
 use clone::Clone;
 use io::IoResult;
@@ -230,19 +232,24 @@ impl Rng for TaskRng {
     }
 }
 
-/// Generate a random value using the task-local random number
-/// generator.
+/// Generates a random value using the task-local random number generator.
 ///
-/// # Example
+/// `random()` can generate various types of random things, and so may require
+/// type hinting to generate the specific type you want.
+///
+/// # Examples
 ///
 /// ```rust
-/// use std::rand::random;
+/// use std::rand;
 ///
-/// if random() {
-///     let x = random();
-///     println!("{}", 2u * x);
-/// } else {
-///     println!("{}", random::<f64>());
+/// let x = rand::random();
+/// println!("{}", 2u * x);
+///
+/// let y = rand::random::<f64>();
+/// println!("{}", y);
+///
+/// if rand::random() { // generates a boolean
+///     println!("Better lucky than good!");
 /// }
 /// ```
 #[cfg(not(kernel))]
@@ -251,7 +258,7 @@ pub fn random<T: Rand>() -> T {
     task_rng().gen()
 }
 
-/// Randomly sample up to `n` elements from an iterator.
+/// Randomly sample up to `amount` elements from an iterator.
 ///
 /// # Example
 ///
@@ -264,11 +271,11 @@ pub fn random<T: Rand>() -> T {
 /// ```
 pub fn sample<T, I: Iterator<T>, R: Rng>(rng: &mut R,
                                          mut iter: I,
-                                         amt: uint) -> Vec<T> {
-    let mut reservoir: Vec<T> = iter.by_ref().take(amt).collect();
+                                         amount: uint) -> Vec<T> {
+    let mut reservoir: Vec<T> = iter.by_ref().take(amount).collect();
     for (i, elem) in iter.enumerate() {
-        let k = rng.gen_range(0, i + 1 + amt);
-        if k < amt {
+        let k = rng.gen_range(0, i + 1 + amount);
+        if k < amount {
             *reservoir.get_mut(k) = elem;
         }
     }

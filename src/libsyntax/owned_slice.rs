@@ -8,6 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::fmt;
 use std::default::Default;
 use std::hash;
 use std::{mem, raw, ptr, slice};
@@ -20,6 +21,17 @@ pub struct OwnedSlice<T> {
     /// null iff len == 0
     data: *mut T,
     len: uint,
+}
+
+impl<T:fmt::Show> fmt::Show for OwnedSlice<T> {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        try!("OwnedSlice {{".fmt(fmt));
+        for i in self.iter() {
+            try!(i.fmt(fmt));
+        }
+        try!("}}".fmt(fmt));
+        Ok(())
+    }
 }
 
 #[unsafe_destructor]
@@ -69,9 +81,9 @@ impl<T> OwnedSlice<T> {
         static PTR_MARKER: u8 = 0;
         let ptr = if self.data.is_null() {
             // length zero, i.e. this will never be read as a T.
-            &PTR_MARKER as *u8 as *T
+            &PTR_MARKER as *const u8 as *const T
         } else {
-            self.data as *T
+            self.data as *const T
         };
 
         let slice: &[T] = unsafe {mem::transmute(raw::Slice {

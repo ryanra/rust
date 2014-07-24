@@ -34,7 +34,7 @@
 
 use core::prelude::*;
 
-use alloc::owned::Box;
+use alloc::boxed::Box;
 use core::mem;
 use rustrt::local::Local;
 use rustrt::task::{Task, BlockedTask};
@@ -354,7 +354,7 @@ impl<T: Send> Packet<T> {
             }
 
             // We woke ourselves up from select. Assert that the task should be
-            // trashed and returne that we don't have any data.
+            // trashed and returned that we don't have any data.
             n => {
                 let t = unsafe { BlockedTask::cast_from_uint(n) };
                 t.trash();

@@ -14,7 +14,7 @@
 
 use core::prelude::*;
 
-use alloc::owned::Box;
+use alloc::boxed::Box;
 use collections::vec::Vec;
 use core::atomics;
 use core::mem;
@@ -43,7 +43,7 @@ pub fn push(f: proc():Send) {
         rtassert!(!RUNNING.load(atomics::SeqCst));
         let queue = QUEUE.load(atomics::SeqCst);
         rtassert!(queue != 0);
-        (*(queue as *Queue)).lock().push(f);
+        (*(queue as *const Queue)).lock().push(f);
     }
 }
 

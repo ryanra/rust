@@ -75,7 +75,7 @@ impl<'a> CheckStaticVisitor<'a> {
 impl<'a> Visitor<bool> for CheckStaticVisitor<'a> {
 
     fn visit_item(&mut self, i: &ast::Item, _is_const: bool) {
-        debug!("visit_item(item={})", pprust::item_to_str(i));
+        debug!("visit_item(item={})", pprust::item_to_string(i));
         match i.node {
             ast::ItemStatic(_, mutability, ref expr) => {
                 match mutability {
@@ -99,7 +99,7 @@ impl<'a> Visitor<bool> for CheckStaticVisitor<'a> {
     /// of a static item, this method does nothing but walking
     /// down through it.
     fn visit_expr(&mut self, e: &ast::Expr, is_const: bool) {
-        debug!("visit_expr(expr={})", pprust::expr_to_str(e));
+        debug!("visit_expr(expr={})", pprust::expr_to_string(e));
 
         if !is_const {
             return visit::walk_expr(self, e, is_const);
@@ -112,18 +112,18 @@ impl<'a> Visitor<bool> for CheckStaticVisitor<'a> {
                 visit::walk_expr(self, e, is_const);
             }
             ast::ExprVstore(_, ast::ExprVstoreMutSlice) => {
-                self.tcx.sess.span_err(e.span,
-                                       "static items are not allowed to have mutable slices");
+                span_err!(self.tcx.sess, e.span, E0020,
+                    "static items are not allowed to have mutable slices");
            },
             ast::ExprUnary(ast::UnBox, _) => {
-                self.tcx.sess.span_err(e.span,
-                                   "static items are not allowed to have managed pointers");
+                span_err!(self.tcx.sess, e.span, E0021,
+                    "static items are not allowed to have managed pointers");
             }
             ast::ExprBox(..) |
             ast::ExprUnary(ast::UnUniq, _) |
             ast::ExprVstore(_, ast::ExprVstoreUniq) => {
-                self.tcx.sess.span_err(e.span,
-                                   "static items are not allowed to have custom pointers");
+                span_err!(self.tcx.sess, e.span, E0022,
+                    "static items are not allowed to have custom pointers");
             }
             _ => {
                 let node_ty = ty::node_id_to_type(self.tcx, e.id);

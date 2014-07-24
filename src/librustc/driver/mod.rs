@@ -20,12 +20,12 @@ use metadata;
 use std::any::AnyRefExt;
 use std::io;
 use std::os;
-use std::str;
 use std::task::TaskBuilder;
 
 use syntax::ast;
 use syntax::parse;
 use syntax::diagnostic::Emitter;
+use syntax::diagnostics;
 
 use getopts;
 
@@ -36,7 +36,7 @@ pub mod config;
 
 
 pub fn main_args(args: &[String]) -> int {
-    let owned_args = args.to_owned();
+    let owned_args = args.to_vec();
     monitor(proc() run_compiler(owned_args.as_slice()));
     0
 }
@@ -49,8 +49,24 @@ fn run_compiler(args: &[String]) {
         Some(matches) => matches,
         None => return
     };
-    let sopts = config::build_session_options(&matches);
 
+    let descriptions = diagnostics::registry::Registry::new(super::DIAGNOSTICS);
+    match matches.opt_str("explain") {
+        Some(ref code) => {
+            match descriptions.find_description(code.as_slice()) {
+                Some(ref description) => {
+                    println!("{}", description);
+                }
+                None => {
+                    early_error(format!("no extended information for {}", code).as_slice());
+                }
+            }
+            return;
+        },
+        None => ()
+    }
+
+    let sopts = config::build_session_options(&matches);
     let (input, input_file_path) = match matches.free.len() {
         0u => {
             if sopts.describe_lints {
@@ -65,8 +81,7 @@ fn run_compiler(args: &[String]) {
             let ifile = matches.free.get(0).as_slice();
             if ifile == "-" {
                 let contents = io::stdin().read_to_end().unwrap();
-                let src = str::from_utf8(contents.as_slice()).unwrap()
-                                                             .to_string();
+                let src = String::from_utf8(contents).unwrap();
                 (StrInput(src), None)
             } else {
                 (FileInput(Path::new(ifile)), Some(Path::new(ifile)))
@@ -75,7 +90,7 @@ fn run_compiler(args: &[String]) {
         _ => early_error("multiple input filenames provided")
     };
 
-    let sess = build_session(sopts, input_file_path);
+    let sess = build_session(sopts, input_file_path, descriptions);
     let cfg = config::build_configuration(&sess);
     let odir = matches.opt_str("out-dir").map(|o| Path::new(o));
     let ofile = matches.opt_str("o").map(|o| Path::new(o));
@@ -251,7 +266,7 @@ pub fn handle_options(mut args: Vec<String>) -> Option<getopts::Matches> {
         match getopts::getopts(args.as_slice(), config::optgroups().as_slice()) {
             Ok(m) => m,
             Err(f) => {
-                early_error(f.to_str().as_slice());
+                early_error(f.to_string().as_slice());
             }
         };
 
@@ -275,7 +290,7 @@ pub fn handle_options(mut args: Vec<String>) -> Option<getopts::Matches> {
     }
 
     if cg_flags.contains(&"passes=list".to_string()) {
-        unsafe { ::lib::llvm::llvm::LLVMRustPrintPasses(); }
+        unsafe { ::llvm::LLVMRustPrintPasses(); }
         return None;
     }
 
@@ -294,28 +309,26 @@ fn print_crate_info(sess: &Session,
                     odir: &Option<Path>,
                     ofile: &Option<Path>)
                     -> bool {
-    let (crate_id, crate_name, crate_file_name) = sess.opts.print_metas;
+    let (crate_name, crate_file_name) = sess.opts.print_metas;
     // these nasty nested conditions are to avoid doing extra work
-    if crate_id || crate_name || crate_file_name {
+    if crate_name || crate_file_name {
         let attrs = parse_crate_attrs(sess, input);
         let t_outputs = driver::build_output_filenames(input,
                                                        odir,
                                                        ofile,
                                                        attrs.as_slice(),
                                                        sess);
-        let id = link::find_crate_id(attrs.as_slice(),
-                                     t_outputs.out_filestem.as_slice());
+        let id = link::find_crate_name(Some(sess), attrs.as_slice(), input);
 
-        if crate_id {
-            println!("{}", id.to_str());
-        }
         if crate_name {
-            println!("{}", id.name);
+            println!("{}", id);
         }
         if crate_file_name {
             let crate_types = driver::collect_crate_types(sess, attrs.as_slice());
+            let metadata = driver::collect_crate_metadata(sess, attrs.as_slice());
+            *sess.crate_metadata.borrow_mut() = metadata;
             for &style in crate_types.iter() {
-                let fname = link::filename_for_input(sess, style, &id,
+                let fname = link::filename_for_input(sess, style, id.as_slice(),
                                                      &t_outputs.with_extension(""));
                 println!("{}", fname.filename_display());
             }
@@ -385,9 +398,14 @@ fn parse_crate_attrs(sess: &Session, input: &Input) ->
 }
 
 pub fn early_error(msg: &str) -> ! {
-    let mut emitter = diagnostic::EmitterWriter::stderr(diagnostic::Auto);
-    emitter.emit(None, msg, diagnostic::Fatal);
+    let mut emitter = diagnostic::EmitterWriter::stderr(diagnostic::Auto, None);
+    emitter.emit(None, msg, None, diagnostic::Fatal);
     fail!(diagnostic::FatalError);
+}
+
+pub fn early_warn(msg: &str) {
+    let mut emitter = diagnostic::EmitterWriter::stderr(diagnostic::Auto, None);
+    emitter.emit(None, msg, None, diagnostic::Warning);
 }
 
 pub fn list_metadata(sess: &Session, path: &Path,
@@ -426,7 +444,7 @@ fn monitor(f: proc():Send) {
         Err(value) => {
             // Task failed without emitting a fatal diagnostic
             if !value.is::<diagnostic::FatalError>() {
-                let mut emitter = diagnostic::EmitterWriter::stderr(diagnostic::Auto);
+                let mut emitter = diagnostic::EmitterWriter::stderr(diagnostic::Auto, None);
 
                 // a .span_bug or .bug call has already printed what
                 // it wants to print.
@@ -434,6 +452,7 @@ fn monitor(f: proc():Send) {
                     emitter.emit(
                         None,
                         "unexpected failure",
+                        None,
                         diagnostic::Bug);
                 }
 
@@ -444,16 +463,17 @@ fn monitor(f: proc():Send) {
                     "run with `RUST_BACKTRACE=1` for a backtrace".to_string(),
                 ];
                 for note in xs.iter() {
-                    emitter.emit(None, note.as_slice(), diagnostic::Note)
+                    emitter.emit(None, note.as_slice(), None, diagnostic::Note)
                 }
 
-                match r.read_to_str() {
+                match r.read_to_string() {
                     Ok(s) => println!("{}", s),
                     Err(e) => {
                         emitter.emit(None,
                                      format!("failed to read internal \
                                               stderr: {}",
                                              e).as_slice(),
+                                     None,
                                      diagnostic::Error)
                     }
                 }

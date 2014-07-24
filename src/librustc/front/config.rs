@@ -14,6 +14,8 @@ use syntax::codemap;
 
 use std::gc::{Gc, GC};
 
+/// A folder that strips out items that do not belong in the current
+/// configuration.
 struct Context<'a> {
     in_cfg: |attrs: &[ast::Attribute]|: 'a -> bool,
 }
@@ -40,6 +42,9 @@ impl<'a> fold::Folder for Context<'a> {
     }
     fn fold_expr(&mut self, expr: Gc<ast::Expr>) -> Gc<ast::Expr> {
         fold_expr(self, expr)
+    }
+    fn fold_mac(&mut self, mac: &ast::Mac) -> ast::Mac {
+        fold::fold_mac(mac, self)
     }
 }
 
@@ -109,12 +114,12 @@ fn fold_item_underscore(cx: &mut Context, item: &ast::Item_) -> ast::Item_ {
                 .map(|x| *x).collect();
             ast::ItemImpl((*a).clone(), (*b).clone(), c, methods)
         }
-        ast::ItemTrait(ref a, b, ref c, ref methods) => {
+        ast::ItemTrait(ref a, ref b, ref c, ref methods) => {
             let methods = methods.iter()
                                  .filter(|m| trait_method_in_cfg(cx, *m) )
                                  .map(|x| (*x).clone())
                                  .collect();
-            ast::ItemTrait((*a).clone(), b, (*c).clone(), methods)
+            ast::ItemTrait((*a).clone(), (*b).clone(), (*c).clone(), methods)
         }
         ast::ItemStruct(ref def, ref generics) => {
             ast::ItemStruct(fold_struct(cx, &**def), generics.clone())

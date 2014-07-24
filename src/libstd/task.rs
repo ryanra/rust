@@ -91,18 +91,22 @@
 //! # }
 //! ```
 
+#![stable]
+
 use any::Any;
 use comm::channel;
 use io::{Writer, stdio};
 use kinds::{Send, marker};
 use option::{None, Some, Option};
-use owned::Box;
+use boxed::Box;
 use result::Result;
 use rt::local::Local;
 use rt::task;
 use rt::task::Task;
 use str::{Str, SendStr, IntoMaybeOwned};
+use string::String;
 use sync::Future;
+use to_str::ToString;
 
 /// A means of spawning a task
 pub trait Spawner {
@@ -170,6 +174,7 @@ impl TaskBuilder<SiblingSpawner> {
 impl<S: Spawner> TaskBuilder<S> {
     /// Name the task-to-be. Currently the name is used for identification
     /// only in failure messages.
+    #[unstable = "IntoMaybeOwned will probably change."]
     pub fn named<T: IntoMaybeOwned<'static>>(mut self, name: T) -> TaskBuilder<S> {
         self.name = Some(name.into_maybe_owned());
         self
@@ -182,12 +187,14 @@ impl<S: Spawner> TaskBuilder<S> {
     }
 
     /// Redirect task-local stdout.
+    #[experimental = "May not want to make stdio overridable here."]
     pub fn stdout(mut self, stdout: Box<Writer + Send>) -> TaskBuilder<S> {
         self.stdout = Some(stdout);
         self
     }
 
     /// Redirect task-local stderr.
+    #[experimental = "May not want to make stdio overridable here."]
     pub fn stderr(mut self, stderr: Box<Writer + Send>) -> TaskBuilder<S> {
         self.stderr = Some(stderr);
         self
@@ -286,6 +293,7 @@ impl<S: Spawner> TaskBuilder<S> {
     /// future returns `result::Ok` containing the value returned by the
     /// function. If the child task fails then the future returns `result::Err`
     /// containing the argument to `fail!(...)` as an `Any` trait object.
+    #[experimental = "Futures are experimental."]
     pub fn try_future<T:Send>(self, f: proc():Send -> T)
                               -> Future<Result<T, Box<Any + Send>>> {
         // currently, the on_exit proc provided by librustrt only works for unit
@@ -306,6 +314,7 @@ impl<S: Spawner> TaskBuilder<S> {
 
     /// Execute a function in a newly-spawnedtask and block until the task
     /// completes or fails. Equivalent to `.try_future(f).unwrap()`.
+    #[unstable = "Error type may change."]
     pub fn try<T:Send>(self, f: proc():Send -> T) -> Result<T, Box<Any + Send>> {
         self.try_future(f).unwrap()
     }
@@ -327,6 +336,7 @@ pub fn spawn(f: proc(): Send) {
 /// value of the function or an error if the task failed.
 ///
 /// This is equivalent to `TaskBuilder::new().try`.
+#[unstable = "Error type may change."]
 pub fn try<T: Send>(f: proc(): Send -> T) -> Result<T, Box<Any + Send>> {
     TaskBuilder::new().try(f)
 }
@@ -335,6 +345,7 @@ pub fn try<T: Send>(f: proc(): Send -> T) -> Result<T, Box<Any + Send>> {
 /// task's result.
 ///
 /// This is equivalent to `TaskBuilder::new().try_future`.
+#[experimental = "Futures are experimental."]
 pub fn try_future<T:Send>(f: proc():Send -> T) -> Future<Result<T, Box<Any + Send>>> {
     TaskBuilder::new().try_future(f)
 }
@@ -343,6 +354,7 @@ pub fn try_future<T:Send>(f: proc():Send -> T) -> Future<Result<T, Box<Any + Sen
 /* Lifecycle functions */
 
 /// Read the name of the current task.
+#[deprecated = "Use `task::name()`."]
 pub fn with_task_name<U>(blk: |Option<&str>| -> U) -> U {
     use rt::task::Task;
 
@@ -353,7 +365,20 @@ pub fn with_task_name<U>(blk: |Option<&str>| -> U) -> U {
     }
 }
 
+/// Read the name of the current task.
+#[stable]
+pub fn name() -> Option<String> {
+    use rt::task::Task;
+
+    let task = Local::borrow(None::<Task>);
+    match task.name {
+        Some(ref name) => Some(name.as_slice().to_string()),
+        None => None
+    }
+}
+
 /// Yield control to the task scheduler.
+#[unstable = "Name will change."]
 pub fn deschedule() {
     use rt::local::Local;
 
@@ -364,6 +389,7 @@ pub fn deschedule() {
 
 /// True if the running task is currently failing (e.g. will return `true` inside a
 /// destructor that is run while unwinding the stack after a call to `fail!()`).
+#[unstable = "May move to a different module."]
 pub fn failing() -> bool {
     use rt::task::Task;
     Local::borrow(None::<Task>).unwinder.unwinding()
@@ -372,10 +398,9 @@ pub fn failing() -> bool {
 #[cfg(test)]
 mod test {
     use any::{Any, AnyRefExt};
-    use owned::AnyOwnExt;
+    use boxed::BoxAny;
     use result;
     use result::{Ok, Err};
-    use str::StrAllocating;
     use string::String;
     use std::io::{ChanReader, ChanWriter};
     use prelude::*;
@@ -386,38 +411,30 @@ mod test {
 
     #[test]
     fn test_unnamed_task() {
-        spawn(proc() {
-            with_task_name(|name| {
-                assert!(name.is_none());
-            })
-        })
+        try(proc() {
+            assert!(name().is_none());
+        }).map_err(|_| ()).unwrap();
     }
 
     #[test]
     fn test_owned_named_task() {
-        TaskBuilder::new().named("ada lovelace".to_string()).spawn(proc() {
-            with_task_name(|name| {
-                assert!(name.unwrap() == "ada lovelace");
-            })
-        })
+        TaskBuilder::new().named("ada lovelace".to_string()).try(proc() {
+            assert!(name().unwrap() == "ada lovelace".to_string());
+        }).map_err(|_| ()).unwrap();
     }
 
     #[test]
     fn test_static_named_task() {
-        TaskBuilder::new().named("ada lovelace").spawn(proc() {
-            with_task_name(|name| {
-                assert!(name.unwrap() == "ada lovelace");
-            })
-        })
+        TaskBuilder::new().named("ada lovelace").try(proc() {
+            assert!(name().unwrap() == "ada lovelace".to_string());
+        }).map_err(|_| ()).unwrap();
     }
 
     #[test]
     fn test_send_named_task() {
-        TaskBuilder::new().named("ada lovelace".into_maybe_owned()).spawn(proc() {
-            with_task_name(|name| {
-                assert!(name.unwrap() == "ada lovelace");
-            })
-        })
+        TaskBuilder::new().named("ada lovelace".into_maybe_owned()).try(proc() {
+            assert!(name().unwrap() == "ada lovelace".to_string());
+        }).map_err(|_| ()).unwrap();
     }
 
     #[test]
@@ -511,10 +528,10 @@ mod test {
         let (tx, rx) = channel::<uint>();
 
         let x = box 1;
-        let x_in_parent = (&*x) as *int as uint;
+        let x_in_parent = (&*x) as *const int as uint;
 
         spawnfn(proc() {
-            let x_in_child = (&*x) as *int as uint;
+            let x_in_child = (&*x) as *const int as uint;
             tx.send(x_in_child);
         });
 
@@ -576,7 +593,7 @@ mod test {
             Err(e) => {
                 type T = &'static str;
                 assert!(e.is::<T>());
-                assert_eq!(*e.move::<T>().unwrap(), "static string");
+                assert_eq!(*e.downcast::<T>().unwrap(), "static string");
             }
             Ok(()) => fail!()
         }
@@ -590,7 +607,7 @@ mod test {
             Err(e) => {
                 type T = String;
                 assert!(e.is::<T>());
-                assert_eq!(*e.move::<T>().unwrap(), "owned string".to_string());
+                assert_eq!(*e.downcast::<T>().unwrap(), "owned string".to_string());
             }
             Ok(()) => fail!()
         }
@@ -604,9 +621,9 @@ mod test {
             Err(e) => {
                 type T = Box<Any + Send>;
                 assert!(e.is::<T>());
-                let any = e.move::<T>().unwrap();
+                let any = e.downcast::<T>().unwrap();
                 assert!(any.is::<u16>());
-                assert_eq!(*any.move::<u16>().unwrap(), 413u16);
+                assert_eq!(*any.downcast::<u16>().unwrap(), 413u16);
             }
             Ok(()) => fail!()
         }
@@ -630,11 +647,13 @@ mod test {
         let mut reader = ChanReader::new(rx);
         let stdout = ChanWriter::new(tx);
 
-        TaskBuilder::new().stdout(box stdout as Box<Writer + Send>).try(proc() {
-            print!("Hello, world!");
-        }).unwrap();
+        let r = TaskBuilder::new().stdout(box stdout as Box<Writer + Send>)
+                                  .try(proc() {
+                print!("Hello, world!");
+            });
+        assert!(r.is_ok());
 
-        let output = reader.read_to_str().unwrap();
+        let output = reader.read_to_string().unwrap();
         assert_eq!(output, "Hello, world!".to_string());
     }
 
@@ -647,7 +666,7 @@ fn task_abort_no_kill_runtime() {
     use std::io::timer;
     use mem;
 
-    let mut tb = TaskBuilder::new();
+    let tb = TaskBuilder::new();
     let rx = tb.try_future(proc() {});
     mem::drop(rx);
     timer::sleep(1000);

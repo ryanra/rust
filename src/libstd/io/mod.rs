@@ -216,6 +216,7 @@ responding to errors that may occur while attempting to read the numbers.
 
 */
 
+#![experimental]
 #![deny(unused_must_use)]
 
 use char::Char;
@@ -228,14 +229,15 @@ use mem::transmute;
 use ops::{BitOr, BitAnd, Sub, Not};
 use option::{Option, Some, None};
 #[cfg(not(kernel))] use os;
-use owned::Box;
+use boxed::Box;
 use result::{Ok, Err, Result};
 #[cfg(not(kernel))] use rt::rtio;
 use slice::{Vector, MutableVector, ImmutableVector};
-use str::{Str, StrSlice, StrAllocating};
+use str::{Str, StrSlice};
 use str;
 use string::String;
 use uint;
+use unicode::char::UnicodeChar;
 use vec::Vec;
 
 // Reexports
@@ -291,7 +293,7 @@ pub type IoResult<T> = Result<T, IoError>;
 /// # FIXME
 ///
 /// Is something like this sufficient? It's kind of archaic
-#[deriving(PartialEq, Clone)]
+#[deriving(PartialEq, Eq, Clone)]
 pub struct IoError {
     /// An enumeration which can be matched against for determining the flavor
     /// of error.
@@ -435,7 +437,7 @@ impl fmt::Show for IoError {
 }
 
 /// A list specifying general categories of I/O error.
-#[deriving(PartialEq, Clone, Show)]
+#[deriving(PartialEq, Eq, Clone, Show)]
 pub enum IoErrorKind {
     /// Any I/O error not part of this list.
     OtherIoError,
@@ -567,7 +569,7 @@ pub trait Reader {
     fn read_at_least(&mut self, min: uint, buf: &mut [u8]) -> IoResult<uint> {
         if min > buf.len() {
             return Err(IoError {
-                detail: Some("the buffer is too short".to_string()),
+                detail: Some(String::from_str("the buffer is too short")),
                 ..standard_error(InvalidInput)
             });
         }
@@ -635,7 +637,7 @@ pub trait Reader {
     fn push_at_least(&mut self, min: uint, len: uint, buf: &mut Vec<u8>) -> IoResult<uint> {
         if min > len {
             return Err(IoError {
-                detail: Some("the buffer is too short".to_string()),
+                detail: Some(String::from_str("the buffer is too short")),
                 ..standard_error(InvalidInput)
             });
         }
@@ -703,11 +705,11 @@ pub trait Reader {
     /// This function returns all of the same errors as `read_to_end` with an
     /// additional error if the reader's contents are not a valid sequence of
     /// UTF-8 bytes.
-    fn read_to_str(&mut self) -> IoResult<String> {
+    fn read_to_string(&mut self) -> IoResult<String> {
         self.read_to_end().and_then(|s| {
-            match str::from_utf8(s.as_slice()) {
-                Some(s) => Ok(s.to_string()),
-                None => Err(standard_error(InvalidInput)),
+            match String::from_utf8(s) {
+                Ok(s)  => Ok(s),
+                Err(_) => Err(standard_error(InvalidInput)),
             }
         })
     }
@@ -1440,9 +1442,9 @@ pub trait Buffer: Reader {
     /// valid UTF-8 sequence of bytes.
     fn read_line(&mut self) -> IoResult<String> {
         self.read_until('\n' as u8).and_then(|line|
-            match str::from_utf8(line.as_slice()) {
-                Some(s) => Ok(s.to_string()),
-                None => Err(standard_error(InvalidInput)),
+            match String::from_utf8(line) {
+                Ok(s)  => Ok(s),
+                Err(_) => Err(standard_error(InvalidInput)),
             }
         )
     }

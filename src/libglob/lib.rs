@@ -23,14 +23,14 @@
  * `glob`/`fnmatch` functions.
  */
 
-#![crate_id = "glob#0.11.0"]
+#![crate_name = "glob"]
 #![experimental]
 #![crate_type = "rlib"]
 #![crate_type = "dylib"]
 #![license = "MIT/ASL2"]
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
        html_favicon_url = "http://www.rust-lang.org/favicon.ico",
-       html_root_url = "http://doc.rust-lang.org/0.11.0/",
+       html_root_url = "http://doc.rust-lang.org/master/",
        html_playground_url = "http://play.rust-lang.org/")]
 
 use std::cell::Cell;
@@ -154,7 +154,7 @@ impl Iterator<Path> for Paths {
                 if self.require_dir && !path.is_dir() { continue; }
                 return Some(path);
             }
-            let ref pattern = *self.dir_patterns.get(idx);
+            let ref pattern = self.dir_patterns[idx];
 
             if pattern.matches_with(match path.filename_str() {
                 // this ugly match needs to go here to avoid a borrowck error
@@ -250,21 +250,21 @@ impl Pattern {
         let mut i = 0;
 
         while i < chars.len() {
-            match *chars.get(i) {
+            match chars[i] {
                 '?' => {
                     tokens.push(AnyChar);
                     i += 1;
                 }
                 '*' => {
                     // *, **, ***, ****, ... are all equivalent
-                    while i < chars.len() && *chars.get(i) == '*' {
+                    while i < chars.len() && chars[i] == '*' {
                         i += 1;
                     }
                     tokens.push(AnySequence);
                 }
                 '[' => {
 
-                    if i <= chars.len() - 4 && *chars.get(i + 1) == '!' {
+                    if i <= chars.len() - 4 && chars[i + 1] == '!' {
                         match chars.slice_from(i + 3).position_elem(&']') {
                             None => (),
                             Some(j) => {
@@ -276,7 +276,7 @@ impl Pattern {
                             }
                         }
                     }
-                    else if i <= chars.len() - 3 && *chars.get(i + 1) != '!' {
+                    else if i <= chars.len() - 3 && chars[i + 1] != '!' {
                         match chars.slice_from(i + 2).position_elem(&']') {
                             None => (),
                             Some(j) => {
@@ -507,7 +507,7 @@ fn fill_todo(todo: &mut Vec<(Path, uint)>, patterns: &[Pattern], idx: uint, path
                     // the current and parent directory respectively requires that
                     // the pattern has a leading dot, even if the `MatchOptions` field
                     // `require_literal_leading_dot` is not set.
-                    if pattern.tokens.len() > 0 && pattern.tokens.get(0) == &Char('.') {
+                    if pattern.tokens.len() > 0 && pattern.tokens[0] == Char('.') {
                         for &special in [".", ".."].iter() {
                             if pattern.matches_with(special, options) {
                                 add(todo, path.join(special));
@@ -601,13 +601,13 @@ pub struct MatchOptions {
      * currently only considers upper/lower case relationships between ASCII characters,
      * but in future this might be extended to work with Unicode.
      */
-    case_sensitive: bool,
+    pub case_sensitive: bool,
 
     /**
      * If this is true then path-component separator characters (e.g. `/` on Posix)
      * must be matched by a literal `/`, rather than by `*` or `?` or `[...]`
      */
-    require_literal_separator: bool,
+    pub require_literal_separator: bool,
 
     /**
      * If this is true then paths that contain components that start with a `.` will
@@ -615,7 +615,7 @@ pub struct MatchOptions {
      * will not match. This is useful because such files are conventionally considered
      * hidden on Unix systems and it might be desirable to skip them when listing files.
      */
-    require_literal_leading_dot: bool
+    pub require_literal_leading_dot: bool
 }
 
 impl MatchOptions {
@@ -701,11 +701,11 @@ mod test {
         for &p in pats.iter() {
             let pat = Pattern::new(p);
             for c in "abcdefghijklmnopqrstuvwxyz".chars() {
-                assert!(pat.matches(c.to_str().as_slice()));
+                assert!(pat.matches(c.to_string().as_slice()));
             }
             for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars() {
                 let options = MatchOptions {case_sensitive: false, .. MatchOptions::new()};
-                assert!(pat.matches_with(c.to_str().as_slice(), options));
+                assert!(pat.matches_with(c.to_string().as_slice(), options));
             }
             assert!(pat.matches("1"));
             assert!(pat.matches("2"));

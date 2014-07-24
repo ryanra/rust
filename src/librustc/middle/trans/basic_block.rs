@@ -8,7 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use lib::llvm::{llvm, BasicBlockRef};
+use llvm;
+use llvm::{BasicBlockRef};
 use middle::trans::value::{Users, Value};
 use std::iter::{Filter, Map};
 
@@ -30,7 +31,7 @@ impl BasicBlock {
         }
     }
 
-    pub fn pred_iter(self) -> Preds {
+    pub fn pred_iter(self) -> Preds<'static> {
         self.as_value().user_iter()
             .filter(|user| user.is_a_terminator_inst())
             .map(|user| user.get_parent().unwrap())

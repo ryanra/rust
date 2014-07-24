@@ -12,10 +12,11 @@
 use back::abi;
 use back::link::mangle_internal_name_by_path_and_seq;
 use driver::config::FullDebugInfo;
-use lib::llvm::ValueRef;
+use llvm::ValueRef;
 use middle::def;
 use middle::freevars;
 use middle::lang_items::ClosureExchangeMallocFnLangItem;
+use middle::trans::adt;
 use middle::trans::base::*;
 use middle::trans::build::*;
 use middle::trans::common::*;
@@ -27,10 +28,11 @@ use middle::trans::type_of::*;
 use middle::trans::type_::Type;
 use middle::ty;
 use util::ppaux::Repr;
-use util::ppaux::ty_to_str;
+use util::ppaux::ty_to_string;
 
 use arena::TypedArena;
 use syntax::ast;
+use syntax::ast_util;
 
 // ___Good to know (tm)__________________________________________________
 //
@@ -104,8 +106,8 @@ pub struct EnvValue {
 }
 
 impl EnvValue {
-    pub fn to_str(&self, ccx: &CrateContext) -> String {
-        format!("{}({})", self.action, self.datum.to_str(ccx))
+    pub fn to_string(&self, ccx: &CrateContext) -> String {
+        format!("{}({})", self.action, self.datum.to_string(ccx))
     }
 }
 
@@ -124,7 +126,7 @@ pub fn mk_closure_tys(tcx: &ty::ctxt,
         }
     }).collect();
     let cdata_ty = ty::mk_tup(tcx, bound_tys);
-    debug!("cdata_ty={}", ty_to_str(tcx, cdata_ty));
+    debug!("cdata_ty={}", ty_to_string(tcx, cdata_ty));
     return cdata_ty;
 }
 
@@ -196,16 +198,16 @@ pub fn store_environment<'a>(
     let Result {bcx: bcx, val: llbox} = allocate_cbox(bcx, store, cdata_ty);
 
     let llbox = PointerCast(bcx, llbox, llboxptr_ty);
-    debug!("tuplify_box_ty = {}", ty_to_str(tcx, cbox_ty));
+    debug!("tuplify_box_ty = {}", ty_to_string(tcx, cbox_ty));
 
     // Copy expr values into boxed bindings.
     let mut bcx = bcx;
     for (i, bv) in bound_values.move_iter().enumerate() {
-        debug!("Copy {} into closure", bv.to_str(ccx));
+        debug!("Copy {} into closure", bv.to_string(ccx));
 
         if ccx.sess().asm_comments() {
             add_comment(bcx, format!("Copy {} into closure",
-                                     bv.to_str(ccx)).as_slice());
+                                     bv.to_string(ccx)).as_slice());
         }
 
         let bound_data = GEPi(bcx, llbox, [0u, abi::box_field_body, i]);
@@ -285,7 +287,6 @@ fn load_environment<'a>(bcx: &'a Block<'a>,
         let def_id = freevar.def.def_id();
 
         bcx.fcx.llupvars.borrow_mut().insert(def_id.node, upvarptr);
-
         for &env_pointer_alloca in env_pointer_alloca.iter() {
             debuginfo::create_captured_var_metadata(
                 bcx,
@@ -298,6 +299,26 @@ fn load_environment<'a>(bcx: &'a Block<'a>,
         }
 
         i += 1u;
+    }
+
+    bcx
+}
+
+fn load_unboxed_closure_environment<'a>(
+                                    bcx: &'a Block<'a>,
+                                    freevars: &Vec<freevars::freevar_entry>)
+                                    -> &'a Block<'a> {
+    let _icx = push_ctxt("closure::load_environment");
+
+    if freevars.len() == 0 {
+        return bcx
+    }
+
+    let llenv = bcx.fcx.llenv.unwrap();
+    for (i, freevar) in freevars.iter().enumerate() {
+        let upvar_ptr = GEPi(bcx, llenv, [0, i]);
+        let def_id = freevar.def.def_id();
+        bcx.fcx.llupvars.borrow_mut().insert(def_id.node, upvar_ptr);
     }
 
     bcx
@@ -352,17 +373,146 @@ pub fn trans_expr_fn<'a>(
 
     let freevar_mode = freevars::get_capture_mode(tcx, id);
     let freevars: Vec<freevars::freevar_entry> =
-        freevars::with_freevars(
-            tcx, id,
-            |fv| fv.iter().map(|&fv| fv).collect());
+        freevars::with_freevars(tcx,
+                                id,
+                                |fv| fv.iter().map(|&fv| fv).collect());
 
-    let ClosureResult {llbox, cdata_ty, bcx} =
-        build_closure(bcx, freevar_mode, &freevars, store);
-    trans_closure(ccx, decl, body, llfn,
-                  bcx.fcx.param_substs, id,
-                  [], ty::ty_fn_ret(fty),
+    let ClosureResult {
+        llbox,
+        cdata_ty,
+        bcx
+    } = build_closure(bcx, freevar_mode, &freevars, store);
+    trans_closure(ccx,
+                  decl,
+                  body,
+                  llfn,
+                  bcx.fcx.param_substs,
+                  id,
+                  [],
+                  ty::ty_fn_args(fty),
+                  ty::ty_fn_ret(fty),
+                  ty::ty_fn_abi(fty),
+                  true,
+                  NotUnboxedClosure,
                   |bcx| load_environment(bcx, cdata_ty, &freevars, store));
     fill_fn_pair(bcx, dest_addr, llfn, llbox);
+    bcx
+}
+
+/// Returns the LLVM function declaration for an unboxed closure, creating it
+/// if necessary. If the ID does not correspond to a closure ID, returns None.
+pub fn get_or_create_declaration_if_unboxed_closure(ccx: &CrateContext,
+                                                    closure_id: ast::DefId)
+                                                    -> Option<ValueRef> {
+    if !ccx.tcx.unboxed_closure_types.borrow().contains_key(&closure_id) {
+        // Not an unboxed closure.
+        return None
+    }
+
+    match ccx.unboxed_closure_vals.borrow().find(&closure_id) {
+        Some(llfn) => {
+            debug!("get_or_create_declaration_if_unboxed_closure(): found \
+                    closure");
+            return Some(*llfn)
+        }
+        None => {}
+    }
+
+    let function_type = ty::mk_unboxed_closure(&ccx.tcx, closure_id);
+    let symbol = ccx.tcx.map.with_path(closure_id.node, |path| {
+        mangle_internal_name_by_path_and_seq(path, "unboxed_closure")
+    });
+
+    let llfn = decl_internal_rust_fn(ccx, function_type, symbol.as_slice());
+
+    // set an inline hint for all closures
+    set_inline_hint(llfn);
+
+    debug!("get_or_create_declaration_if_unboxed_closure(): inserting new \
+            closure {} (type {})",
+           closure_id,
+           ccx.tn.type_to_string(val_ty(llfn)));
+    ccx.unboxed_closure_vals.borrow_mut().insert(closure_id, llfn);
+
+    Some(llfn)
+}
+
+pub fn trans_unboxed_closure<'a>(
+                             mut bcx: &'a Block<'a>,
+                             decl: &ast::FnDecl,
+                             body: &ast::Block,
+                             id: ast::NodeId,
+                             dest: expr::Dest)
+                             -> &'a Block<'a> {
+    let _icx = push_ctxt("closure::trans_unboxed_closure");
+
+    debug!("trans_unboxed_closure()");
+
+    let closure_id = ast_util::local_def(id);
+    let llfn = get_or_create_declaration_if_unboxed_closure(
+        bcx.ccx(),
+        closure_id).unwrap();
+
+    // Untuple the arguments.
+    let unboxed_closure_types = bcx.tcx().unboxed_closure_types.borrow();
+    let /*mut*/ function_type = (*unboxed_closure_types.get(&closure_id)).clone();
+    /*function_type.sig.inputs =
+        match ty::get(*function_type.sig.inputs.get(0)).sty {
+            ty::ty_tup(ref tuple_types) => {
+                tuple_types.iter().map(|x| (*x).clone()).collect()
+            }
+            _ => {
+                bcx.tcx().sess.span_bug(body.span,
+                                        "unboxed closure wasn't a tuple?!")
+            }
+        };*/
+    let function_type = ty::mk_closure(bcx.tcx(), function_type);
+
+    let freevars: Vec<freevars::freevar_entry> =
+        freevars::with_freevars(bcx.tcx(),
+                                id,
+                                |fv| fv.iter().map(|&fv| fv).collect());
+    let freevars_ptr = &freevars;
+
+    trans_closure(bcx.ccx(),
+                  decl,
+                  body,
+                  llfn,
+                  bcx.fcx.param_substs,
+                  id,
+                  [],
+                  ty::ty_fn_args(function_type),
+                  ty::ty_fn_ret(function_type),
+                  ty::ty_fn_abi(function_type),
+                  true,
+                  IsUnboxedClosure,
+                  |bcx| load_unboxed_closure_environment(bcx, freevars_ptr));
+
+    // Don't hoist this to the top of the function. It's perfectly legitimate
+    // to have a zero-size unboxed closure (in which case dest will be
+    // `Ignore`) and we must still generate the closure body.
+    let dest_addr = match dest {
+        expr::SaveIn(p) => p,
+        expr::Ignore => {
+            debug!("trans_unboxed_closure() ignoring result");
+            return bcx
+        }
+    };
+
+    let repr = adt::represent_type(bcx.ccx(), node_id_type(bcx, id));
+
+    // Create the closure.
+    for freevar in freevars_ptr.iter() {
+        let datum = expr::trans_local_var(bcx, freevar.def);
+        let upvar_slot_dest = adt::trans_field_ptr(bcx,
+                                                   &*repr,
+                                                   dest_addr,
+                                                   0,
+                                                   0);
+        bcx = datum.store_to(bcx, upvar_slot_dest);
+    }
+    adt::trans_set_discr(bcx, &*repr, dest_addr, 0);
+
     bcx
 }
 
@@ -424,8 +574,7 @@ pub fn get_wrapper_for_bare_fn(ccx: &CrateContext,
     let empty_param_substs = param_substs::empty();
     let fcx = new_fn_ctxt(ccx, llfn, -1, true, f.sig.output,
                           &empty_param_substs, None, &arena);
-    init_function(&fcx, true, f.sig.output);
-    let bcx = fcx.entry_bcx.borrow().clone().unwrap();
+    let bcx = init_function(&fcx, true, f.sig.output);
 
     let args = create_datums_for_fn_args(&fcx,
                                          ty::ty_fn_args(closure_ty)

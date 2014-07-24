@@ -37,6 +37,10 @@
 //! assert!(SketchyNum {num: 25} != SketchyNum {num: 57});
 //! ```
 
+#![stable]
+
+use option::{Option, Some};
+
 /// Trait for values that can be compared for equality and inequality.
 ///
 /// This trait allows for partial equality, for types that do not have an
@@ -51,6 +55,7 @@
 /// Eventually, this will be implemented by default for types that implement
 /// `Eq`.
 #[lang="eq"]
+#[unstable = "Definition may change slightly after trait reform"]
 pub trait PartialEq {
     /// This method tests for `self` and `other` values to be equal, and is used by `==`.
     fn eq(&self, other: &Self) -> bool;
@@ -69,6 +74,7 @@ pub trait PartialEq {
 /// - reflexive: `a == a`;
 /// - symmetric: `a == b` implies `b == a`; and
 /// - transitive: `a == b` and `b == c` implies `a == c`.
+#[unstable = "Definition may change slightly after trait reform"]
 pub trait Eq: PartialEq {
     // FIXME #13101: this method is used solely by #[deriving] to
     // assert that every component of a type implements #[deriving]
@@ -84,13 +90,14 @@ pub trait Eq: PartialEq {
 
 /// An ordering is, e.g, a result of a comparison between two values.
 #[deriving(Clone, PartialEq, Show)]
+#[stable]
 pub enum Ordering {
    /// An ordering where a compared value is less [than another].
-   Less = -1,
+   Less = -1i,
    /// An ordering where a compared value is equal [to another].
-   Equal = 0,
+   Equal = 0i,
    /// An ordering where a compared value is greater [than another].
-   Greater = 1
+   Greater = 1i,
 }
 
 /// Trait for types that form a [total order](
@@ -102,6 +109,7 @@ pub enum Ordering {
 ///   true; and
 /// - transitive, `a < b` and `b < c` implies `a < c`. The same must hold for
 ///   both `==` and `>`.
+#[unstable = "Definition may change slightly after trait reform"]
 pub trait Ord: Eq + PartialOrd {
     /// This method returns an ordering between `self` and `other` values.
     ///
@@ -116,8 +124,10 @@ pub trait Ord: Eq + PartialOrd {
     fn cmp(&self, other: &Self) -> Ordering;
 }
 
+#[unstable = "Trait is unstable."]
 impl Eq for Ordering {}
 
+#[unstable = "Trait is unstable."]
 impl Ord for Ordering {
     #[inline]
     fn cmp(&self, other: &Ordering) -> Ordering {
@@ -125,9 +135,12 @@ impl Ord for Ordering {
     }
 }
 
+#[unstable = "Trait is unstable."]
 impl PartialOrd for Ordering {
     #[inline]
-    fn lt(&self, other: &Ordering) -> bool { (*self as int) < (*other as int) }
+    fn partial_cmp(&self, other: &Ordering) -> Option<Ordering> {
+        (*self as int).partial_cmp(&(*other as int))
+    }
 }
 
 /// Combine orderings, lexically.
@@ -136,6 +149,7 @@ impl PartialOrd for Ordering {
 /// If the first ordering is different, the first ordering is all that must be returned.
 /// If the first ordering is equal, then second ordering is returned.
 #[inline]
+#[deprecated = "Just call .cmp() on an Ordering"]
 pub fn lexical_ordering(o1: Ordering, o2: Ordering) -> Ordering {
     match o1 {
         Equal => o2,
@@ -145,7 +159,7 @@ pub fn lexical_ordering(o1: Ordering, o2: Ordering) -> Ordering {
 
 /// Trait for values that can be compared for a sort-order.
 ///
-/// PartialOrd only requires implementation of the `lt` method,
+/// PartialOrd only requires implementation of the `partial_cmp` method,
 /// with the others generated from default implementations.
 ///
 /// However it remains possible to implement the others separately for types
@@ -153,27 +167,53 @@ pub fn lexical_ordering(o1: Ordering, o2: Ordering) -> Ordering {
 /// `NaN < 0 == false` and `NaN >= 0 == false` (cf. IEEE 754-2008 section
 /// 5.11).
 #[lang="ord"]
+#[unstable = "Definition may change slightly after trait reform"]
 pub trait PartialOrd: PartialEq {
+    /// This method returns an ordering between `self` and `other` values
+    /// if one exists.
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering>;
+
     /// This method tests less than (for `self` and `other`) and is used by the `<` operator.
-    fn lt(&self, other: &Self) -> bool;
+    fn lt(&self, other: &Self) -> bool {
+        match self.partial_cmp(other) {
+            Some(Less) => true,
+            _ => false,
+        }
+    }
 
     /// This method tests less than or equal to (`<=`).
     #[inline]
-    fn le(&self, other: &Self) -> bool { !other.lt(self) }
+    fn le(&self, other: &Self) -> bool {
+        match self.partial_cmp(other) {
+            Some(Less) | Some(Equal) => true,
+            _ => false,
+        }
+    }
 
     /// This method tests greater than (`>`).
     #[inline]
-    fn gt(&self, other: &Self) -> bool {  other.lt(self) }
+    fn gt(&self, other: &Self) -> bool {
+        match self.partial_cmp(other) {
+            Some(Greater) => true,
+            _ => false,
+        }
+    }
 
     /// This method tests greater than or equal to (`>=`).
     #[inline]
-    fn ge(&self, other: &Self) -> bool { !self.lt(other) }
+    fn ge(&self, other: &Self) -> bool {
+        match self.partial_cmp(other) {
+            Some(Greater) | Some(Equal) => true,
+            _ => false,
+        }
+    }
 }
 
 /// The equivalence relation. Two values may be equivalent even if they are
 /// of different types. The most common use case for this relation is
 /// container types; e.g. it is often desirable to be able to use `&str`
 /// values to look up entries in a container with `String` keys.
+#[experimental = "Better solutions may be discovered."]
 pub trait Equiv<T> {
     /// Implement this function to decide equivalent values.
     fn equiv(&self, other: &T) -> bool;
@@ -181,24 +221,27 @@ pub trait Equiv<T> {
 
 /// Compare and return the minimum of two values.
 #[inline]
+#[stable]
 pub fn min<T: Ord>(v1: T, v2: T) -> T {
     if v1 < v2 { v1 } else { v2 }
 }
 
 /// Compare and return the maximum of two values.
 #[inline]
+#[stable]
 pub fn max<T: Ord>(v1: T, v2: T) -> T {
     if v1 > v2 { v1 } else { v2 }
 }
 
 // Implementation of PartialEq, Eq, PartialOrd and Ord for primitive types
-#[cfg(not(test))]
 mod impls {
     use cmp::{PartialOrd, Ord, PartialEq, Eq, Ordering,
               Less, Greater, Equal};
+    use option::{Option, Some, None};
 
     macro_rules! eq_impl(
         ($($t:ty)*) => ($(
+            #[unstable = "Trait is unstable."]
             impl PartialEq for $t {
                 #[inline]
                 fn eq(&self, other: &$t) -> bool { (*self) == (*other) }
@@ -208,6 +251,7 @@ mod impls {
         )*)
     )
 
+    #[unstable = "Trait is unstable."]
     impl PartialEq for () {
         #[inline]
         fn eq(&self, _other: &()) -> bool { true }
@@ -219,6 +263,7 @@ mod impls {
 
     macro_rules! totaleq_impl(
         ($($t:ty)*) => ($(
+            #[unstable = "Trait is unstable."]
             impl Eq for $t {}
         )*)
     )
@@ -227,7 +272,17 @@ mod impls {
 
     macro_rules! ord_impl(
         ($($t:ty)*) => ($(
+            #[unstable = "Trait is unstable."]
             impl PartialOrd for $t {
+                #[inline]
+                fn partial_cmp(&self, other: &$t) -> Option<Ordering> {
+                    match (self <= other, self >= other) {
+                        (false, false) => None,
+                        (false, true) => Some(Greater),
+                        (true, false) => Some(Less),
+                        (true, true) => Some(Equal),
+                    }
+                }
                 #[inline]
                 fn lt(&self, other: &$t) -> bool { (*self) < (*other) }
                 #[inline]
@@ -240,15 +295,19 @@ mod impls {
         )*)
     )
 
+    #[unstable = "Trait is unstable."]
     impl PartialOrd for () {
         #[inline]
-        fn lt(&self, _other: &()) -> bool { false }
+        fn partial_cmp(&self, _: &()) -> Option<Ordering> {
+            Some(Equal)
+        }
     }
 
+    #[unstable = "Trait is unstable."]
     impl PartialOrd for bool {
         #[inline]
-        fn lt(&self, other: &bool) -> bool {
-            (*self as u8) < (*other as u8)
+        fn partial_cmp(&self, other: &bool) -> Option<Ordering> {
+            (*self as u8).partial_cmp(&(*other as u8))
         }
     }
 
@@ -256,6 +315,7 @@ mod impls {
 
     macro_rules! totalord_impl(
         ($($t:ty)*) => ($(
+            #[unstable = "Trait is unstable."]
             impl Ord for $t {
                 #[inline]
                 fn cmp(&self, other: &$t) -> Ordering {
@@ -267,11 +327,13 @@ mod impls {
         )*)
     )
 
+    #[unstable = "Trait is unstable."]
     impl Ord for () {
         #[inline]
         fn cmp(&self, _other: &()) -> Ordering { Equal }
     }
 
+    #[unstable = "Trait is unstable."]
     impl Ord for bool {
         #[inline]
         fn cmp(&self, other: &bool) -> Ordering {
@@ -282,13 +344,19 @@ mod impls {
     totalord_impl!(char uint u8 u16 u32 u64 int i8 i16 i32 i64)
 
     // & pointers
+    #[unstable = "Trait is unstable."]
     impl<'a, T: PartialEq> PartialEq for &'a T {
         #[inline]
         fn eq(&self, other: & &'a T) -> bool { *(*self) == *(*other) }
         #[inline]
         fn ne(&self, other: & &'a T) -> bool { *(*self) != *(*other) }
     }
+    #[unstable = "Trait is unstable."]
     impl<'a, T: PartialOrd> PartialOrd for &'a T {
+        #[inline]
+        fn partial_cmp(&self, other: &&'a T) -> Option<Ordering> {
+            (**self).partial_cmp(*other)
+        }
         #[inline]
         fn lt(&self, other: & &'a T) -> bool { *(*self) < *(*other) }
         #[inline]
@@ -298,20 +366,28 @@ mod impls {
         #[inline]
         fn gt(&self, other: & &'a T) -> bool { *(*self) > *(*other) }
     }
+    #[unstable = "Trait is unstable."]
     impl<'a, T: Ord> Ord for &'a T {
         #[inline]
         fn cmp(&self, other: & &'a T) -> Ordering { (**self).cmp(*other) }
     }
+    #[unstable = "Trait is unstable."]
     impl<'a, T: Eq> Eq for &'a T {}
 
     // &mut pointers
+    #[unstable = "Trait is unstable."]
     impl<'a, T: PartialEq> PartialEq for &'a mut T {
         #[inline]
         fn eq(&self, other: &&'a mut T) -> bool { **self == *(*other) }
         #[inline]
         fn ne(&self, other: &&'a mut T) -> bool { **self != *(*other) }
     }
+    #[unstable = "Trait is unstable."]
     impl<'a, T: PartialOrd> PartialOrd for &'a mut T {
+        #[inline]
+        fn partial_cmp(&self, other: &&'a mut T) -> Option<Ordering> {
+            (**self).partial_cmp(*other)
+        }
         #[inline]
         fn lt(&self, other: &&'a mut T) -> bool { **self < **other }
         #[inline]
@@ -321,72 +397,11 @@ mod impls {
         #[inline]
         fn gt(&self, other: &&'a mut T) -> bool { **self > **other }
     }
+    #[unstable = "Trait is unstable."]
     impl<'a, T: Ord> Ord for &'a mut T {
         #[inline]
         fn cmp(&self, other: &&'a mut T) -> Ordering { (**self).cmp(*other) }
     }
+    #[unstable = "Trait is unstable."]
     impl<'a, T: Eq> Eq for &'a mut T {}
-}
-
-#[cfg(test)]
-mod test {
-    use super::lexical_ordering;
-
-    #[test]
-    fn test_int_totalord() {
-        assert_eq!(5u.cmp(&10), Less);
-        assert_eq!(10u.cmp(&5), Greater);
-        assert_eq!(5u.cmp(&5), Equal);
-        assert_eq!((-5u).cmp(&12), Less);
-        assert_eq!(12u.cmp(-5), Greater);
-    }
-
-    #[test]
-    fn test_mut_int_totalord() {
-        assert_eq!((&mut 5u).cmp(&10), Less);
-        assert_eq!((&mut 10u).cmp(&5), Greater);
-        assert_eq!((&mut 5u).cmp(&5), Equal);
-        assert_eq!((&mut -5u).cmp(&12), Less);
-        assert_eq!((&mut 12u).cmp(-5), Greater);
-    }
-
-    #[test]
-    fn test_ordering_order() {
-        assert!(Less < Equal);
-        assert_eq!(Greater.cmp(&Less), Greater);
-    }
-
-    #[test]
-    fn test_lexical_ordering() {
-        fn t(o1: Ordering, o2: Ordering, e: Ordering) {
-            assert_eq!(lexical_ordering(o1, o2), e);
-        }
-
-        let xs = [Less, Equal, Greater];
-        for &o in xs.iter() {
-            t(Less, o, Less);
-            t(Equal, o, o);
-            t(Greater, o, Greater);
-         }
-    }
-
-    #[test]
-    fn test_user_defined_eq() {
-        // Our type.
-        struct SketchyNum {
-            num : int
-        }
-
-        // Our implementation of `PartialEq` to support `==` and `!=`.
-        impl PartialEq for SketchyNum {
-            // Our custom eq allows numbers which are near each other to be equal! :D
-            fn eq(&self, other: &SketchyNum) -> bool {
-                (self.num - other.num).abs() < 5
-            }
-        }
-
-        // Now these binary operators will work when applied!
-        assert!(SketchyNum {num: 37} == SketchyNum {num: 34});
-        assert!(SketchyNum {num: 25} != SketchyNum {num: 57});
-    }
 }

@@ -133,7 +133,7 @@ use middle::typeck::infer;
 use middle::typeck::MethodCall;
 use middle::pat_util;
 use util::nodemap::NodeMap;
-use util::ppaux::{ty_to_str, region_to_str, Repr};
+use util::ppaux::{ty_to_string, region_to_string, Repr};
 
 use syntax::ast;
 use syntax::codemap::Span;
@@ -587,7 +587,9 @@ fn visit_expr(rcx: &mut Rcx, expr: &ast::Expr) {
             visit::walk_expr(rcx, expr, ());
         }
 
-        ast::ExprFnBlock(_, ref body) | ast::ExprProc(_, ref body) => {
+        ast::ExprFnBlock(_, ref body) |
+        ast::ExprProc(_, ref body) |
+        ast::ExprUnboxedFn(_, ref body) => {
             check_expr_fn_block(rcx, expr, &**body);
         }
 
@@ -876,7 +878,7 @@ fn constrain_autoderefs(rcx: &mut Rcx,
     let r_deref_expr = ty::ReScope(deref_expr.id);
     for i in range(0u, derefs) {
         debug!("constrain_autoderefs(deref_expr=?, derefd_ty={}, derefs={:?}/{:?}",
-               rcx.fcx.infcx().ty_to_str(derefd_ty),
+               rcx.fcx.infcx().ty_to_string(derefd_ty),
                i, derefs);
 
         let method_call = MethodCall::autoderef(deref_expr.id, i);
@@ -948,7 +950,7 @@ fn constrain_index(rcx: &mut Rcx,
      */
 
     debug!("constrain_index(index_expr=?, indexed_ty={}",
-           rcx.fcx.infcx().ty_to_str(indexed_ty));
+           rcx.fcx.infcx().ty_to_string(indexed_ty));
 
     let r_index_expr = ty::ReScope(index_expr.id);
     match ty::get(indexed_ty).sty {
@@ -984,7 +986,7 @@ fn constrain_regions_in_type_of_node(
                            |method_call| rcx.resolve_method_type(method_call));
     debug!("constrain_regions_in_type_of_node(\
             ty={}, ty0={}, id={}, minimum_lifetime={:?})",
-           ty_to_str(tcx, ty), ty_to_str(tcx, ty0),
+           ty_to_string(tcx, ty), ty_to_string(tcx, ty0),
            id, minimum_lifetime);
     constrain_regions_in_type(rcx, minimum_lifetime, origin, ty);
 }
@@ -1011,8 +1013,8 @@ fn constrain_regions_in_type(
     let tcx = rcx.fcx.ccx.tcx;
 
     debug!("constrain_regions_in_type(minimum_lifetime={}, ty={})",
-           region_to_str(tcx, "", false, minimum_lifetime),
-           ty_to_str(tcx, ty));
+           region_to_string(tcx, "", false, minimum_lifetime),
+           ty_to_string(tcx, ty));
 
     relate_nested_regions(tcx, Some(minimum_lifetime), ty, |r_sub, r_sup| {
         debug!("relate_nested_regions(r_sub={}, r_sup={})",
@@ -1190,7 +1192,7 @@ fn link_region_from_node_type(rcx: &Rcx,
     let rptr_ty = rcx.resolve_node_type(id);
     if !ty::type_is_bot(rptr_ty) && !ty::type_is_error(rptr_ty) {
         let tcx = rcx.fcx.ccx.tcx;
-        debug!("rptr_ty={}", ty_to_str(tcx, rptr_ty));
+        debug!("rptr_ty={}", ty_to_string(tcx, rptr_ty));
         let r = ty::ty_region(tcx, span, rptr_ty);
         link_region(rcx, span, r, ty::BorrowKind::from_mutbl(mutbl),
                     cmt_borrowed);
@@ -1219,7 +1221,8 @@ fn link_region(rcx: &Rcx,
                kind.repr(rcx.tcx()),
                cmt_borrowed.repr(rcx.tcx()));
         match cmt_borrowed.cat.clone() {
-            mc::cat_deref(base, _, mc::BorrowedPtr(_, r_borrowed)) => {
+            mc::cat_deref(base, _, mc::BorrowedPtr(_, r_borrowed)) |
+            mc::cat_deref(base, _, mc::Implicit(_, r_borrowed)) => {
                 // References to an upvar `x` are translated to
                 // `*x`, since that is what happens in the
                 // underlying machine.  We detect such references
@@ -1340,7 +1343,8 @@ fn adjust_upvar_borrow_kind_for_mut(rcx: &Rcx,
                 continue;
             }
 
-            mc::cat_deref(base, _, mc::BorrowedPtr(..)) => {
+            mc::cat_deref(base, _, mc::BorrowedPtr(..)) |
+            mc::cat_deref(base, _, mc::Implicit(..)) => {
                 match base.cat {
                     mc::cat_upvar(ref upvar_id, _) => {
                         // if this is an implicit deref of an
@@ -1394,7 +1398,8 @@ fn adjust_upvar_borrow_kind_for_unique(rcx: &Rcx, cmt: mc::cmt) {
                 continue;
             }
 
-            mc::cat_deref(base, _, mc::BorrowedPtr(..)) => {
+            mc::cat_deref(base, _, mc::BorrowedPtr(..)) |
+            mc::cat_deref(base, _, mc::Implicit(..)) => {
                 match base.cat {
                     mc::cat_upvar(ref upvar_id, _) => {
                         // if this is an implicit deref of an

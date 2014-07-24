@@ -13,7 +13,7 @@
 use prelude::*;
 use cmp;
 use io;
-use owned::Box;
+use boxed::Box;
 use slice::bytes::MutableByteVector;
 
 /// Wraps a `Reader`, limiting the number of bytes that can be read from it.
@@ -263,7 +263,7 @@ impl<T: Iterator<u8>> Reader for IterReader<T> {
 mod test {
     use io::{MemReader, MemWriter, BufReader};
     use io;
-    use owned::Box;
+    use boxed::Box;
     use super::*;
     use prelude::*;
 
@@ -379,21 +379,21 @@ mod test {
         let mut r = BufReader::new(data.as_bytes());
         {
             let mut r = LimitReader::new(r.by_ref(), 3);
-            assert_eq!(r.read_line(), Ok("012".to_str()));
+            assert_eq!(r.read_line(), Ok("012".to_string()));
             assert_eq!(r.limit(), 0);
             assert_eq!(r.read_line().err().unwrap().kind, io::EndOfFile);
         }
         {
             let mut r = LimitReader::new(r.by_ref(), 9);
-            assert_eq!(r.read_line(), Ok("3456789\n".to_str()));
+            assert_eq!(r.read_line(), Ok("3456789\n".to_string()));
             assert_eq!(r.limit(), 1);
-            assert_eq!(r.read_line(), Ok("0".to_str()));
+            assert_eq!(r.read_line(), Ok("0".to_string()));
         }
         {
             let mut r = LimitReader::new(r.by_ref(), 100);
             assert_eq!(r.read_char(), Ok('1'));
             assert_eq!(r.limit(), 99);
-            assert_eq!(r.read_line(), Ok("23456789\n".to_str()));
+            assert_eq!(r.read_line(), Ok("23456789\n".to_string()));
         }
     }
 

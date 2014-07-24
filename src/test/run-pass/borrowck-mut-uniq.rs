@@ -24,7 +24,7 @@ fn add_int(x: &mut Ints, v: int) {
 
 fn iter_ints(x: &Ints, f: |x: &int| -> bool) -> bool {
     let l = x.values.len();
-    range(0u, l).advance(|i| f(x.values.get(i)))
+    range(0u, l).all(|i| f(x.values.get(i)))
 }
 
 pub fn main() {
@@ -32,7 +32,7 @@ pub fn main() {
     add_int(&mut *ints, 22);
     add_int(&mut *ints, 44);
 
-    iter_ints(ints, |i| {
+    iter_ints(&*ints, |i| {
         println!("int = {}", *i);
         true
     });

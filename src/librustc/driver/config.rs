@@ -11,7 +11,7 @@
 //! Contains infrastructure for configuring the compiler, including parsing
 //! command line options.
 
-use driver::early_error;
+use driver::{early_error, early_warn};
 use driver::driver;
 use driver::session::Session;
 
@@ -30,13 +30,13 @@ use syntax::diagnostic::{ColorConfig, Auto, Always, Never};
 use syntax::parse;
 use syntax::parse::token::InternedString;
 
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use getopts::{optopt, optmulti, optflag, optflagopt};
 use getopts;
-use lib::llvm::llvm;
 use std::cell::{RefCell};
 use std::fmt;
 
+use llvm;
 
 pub struct Config {
     pub os: abi::Os,
@@ -91,10 +91,12 @@ pub struct Options {
     pub debugging_opts: u64,
     /// Whether to write dependency files. It's (enabled, optional filename).
     pub write_dependency_info: (bool, Option<Path>),
-    /// Crate id-related things to maybe print. It's (crate_id, crate_name, crate_file_name).
-    pub print_metas: (bool, bool, bool),
+    /// Crate id-related things to maybe print. It's (crate_name, crate_file_name).
+    pub print_metas: (bool, bool),
     pub cg: CodegenOptions,
     pub color: ColorConfig,
+    pub externs: HashMap<String, Vec<String>>,
+    pub crate_name: Option<String>,
 }
 
 /// Some reasonable defaults
@@ -117,9 +119,11 @@ pub fn basic_options() -> Options {
         no_analysis: false,
         debugging_opts: 0,
         write_dependency_info: (false, None),
-        print_metas: (false, false, false),
+        print_metas: (false, false),
         cg: basic_codegen_options(),
         color: Auto,
+        externs: HashMap::new(),
+        crate_name: None,
     }
 }
 
@@ -175,7 +179,11 @@ debugging_opts!(
         AST_JSON,
         AST_JSON_NOEXPAND,
         LS,
-        SAVE_ANALYSIS
+        SAVE_ANALYSIS,
+        FLOWGRAPH_PRINT_LOANS,
+        FLOWGRAPH_PRINT_MOVES,
+        FLOWGRAPH_PRINT_ASSIGNS,
+        FLOWGRAPH_PRINT_ALL
     ]
     0
 )
@@ -211,7 +219,15 @@ pub fn debugging_opts_map() -> Vec<(&'static str, &'static str, u64)> {
      ("ast-json-noexpand", "Print the pre-expansion AST as JSON and halt", AST_JSON_NOEXPAND),
      ("ls", "List the symbols defined by a library crate", LS),
      ("save-analysis", "Write syntax and type analysis information \
-                        in addition to normal output", SAVE_ANALYSIS))
+                        in addition to normal output", SAVE_ANALYSIS),
+     ("flowgraph-print-loans", "Include loan analysis data in \
+                       --pretty flowgraph output", FLOWGRAPH_PRINT_LOANS),
+     ("flowgraph-print-moves", "Include move analysis data in \
+                       --pretty flowgraph output", FLOWGRAPH_PRINT_MOVES),
+     ("flowgraph-print-assigns", "Include assignment analysis data in \
+                       --pretty flowgraph output", FLOWGRAPH_PRINT_ASSIGNS),
+     ("flowgraph-print-all", "Include all dataflow analysis data in \
+                       --pretty flowgraph output", FLOWGRAPH_PRINT_ALL))
 }
 
 /// Declare a macro that will define all CodegenOptions fields and parsers all
@@ -302,8 +318,8 @@ cgoptions!(
         "a list of arguments to pass to llvm (space separated)"),
     save_temps: bool = (false, parse_bool,
         "save all temporary output files during compilation"),
-    no_rpath: bool = (false, parse_bool,
-        "disables setting the rpath in libs/exes"),
+    rpath: bool = (false, parse_bool,
+        "set rpath values in libs/exes"),
     no_prepopulate_passes: bool = (false, parse_bool,
         "don't pre-populate the pass manager with a list of passes"),
     no_vectorize_loops: bool = (false, parse_bool,
@@ -316,8 +332,16 @@ cgoptions!(
         "prefer dynamic linking to static linking"),
     no_integrated_as: bool = (false, parse_bool,
         "use an external assembler rather than LLVM's integrated one"),
+    no_redzone: bool = (false, parse_bool,
+        "disable the use of the redzone"),
     relocation_model: String = ("pic".to_string(), parse_string,
          "choose the relocation model to use (llc -relocation-model for details)"),
+    code_model: String = ("default".to_string(), parse_string,
+         "choose the code model to use (llc -code-model for details)"),
+    metadata: Vec<String> = (Vec::new(), parse_list,
+         "metadata to mangle symbol names with"),
+    extra_filename: String = ("".to_string(), parse_string,
+         "extra data to put in each output filename"),
 )
 
 pub fn build_codegen_options(matches: &getopts::Matches) -> CodegenOptions
@@ -427,7 +451,7 @@ pub fn get_os(triple: &str) -> Option<abi::Os> {
     }
     None
 }
-static os_names : &'static [(&'static str, abi::Os)] = &'static [
+static os_names : &'static [(&'static str, abi::Os)] = &[
     ("mingw32", abi::OsWin32),
     ("win32",   abi::OsWin32),
     ("darwin",  abi::OsMacos),
@@ -442,7 +466,7 @@ pub fn get_arch(triple: &str) -> Option<abi::Architecture> {
     }
     None
 }
-static architecture_abis : &'static [(&'static str, abi::Architecture)] = &'static [
+static architecture_abis : &'static [(&'static str, abi::Architecture)] = &[
     ("i386",   abi::X86),
     ("i486",   abi::X86),
     ("i586",   abi::X86),
@@ -505,10 +529,12 @@ pub fn optgroups() -> Vec<getopts::OptGroup> {
                  "[bin|lib|rlib|dylib|staticlib]"),
         optmulti("", "emit", "Comma separated list of types of output for the compiler to emit",
                  "[asm|bc|ir|obj|link]"),
-        optflag("", "crate-id", "Output the crate id and exit"),
-        optflag("", "crate-name", "Output the crate name and exit"),
-        optflag("", "crate-file-name", "Output the file(s) that would be written if compilation \
+        optopt("", "crate-name", "Specify the name of the crate being built",
+               "NAME"),
+        optflag("", "print-crate-name", "Output the crate name and exit"),
+        optflag("", "print-file-name", "Output the file(s) that would be written if compilation \
               continued and exit"),
+        optflag("", "crate-file-name", "deprecated in favor of --print-file-name"),
         optflag("g",  "",  "Equivalent to --debuginfo=2"),
         optopt("",  "debuginfo",  "Emit DWARF debug info to the objects created:
              0 = no debug info,
@@ -522,6 +548,7 @@ pub fn optgroups() -> Vec<getopts::OptGroup> {
         optopt("", "opt-level", "Optimize with possible levels 0-3", "LEVEL"),
         optopt( "",  "out-dir", "Write output to compiler-chosen filename in <dir>", "DIR"),
         optflag("", "parse-only", "Parse only; do not compile, assemble, or link"),
+        optopt("", "explain", "Provide a detailed explanation of an error message", "OPT"),
         optflagopt("", "pretty",
                    "Pretty-print the input instead of compiling;
                    valid types are: `normal` (un-annotated source),
@@ -548,7 +575,9 @@ pub fn optgroups() -> Vec<getopts::OptGroup> {
         optopt("", "color", "Configure coloring of output:
             auto   = colorize, if output goes to a tty (default);
             always = always colorize output;
-            never  = never colorize output", "auto|always|never")
+            never  = never colorize output", "auto|always|never"),
+        optmulti("", "extern", "Specify where an external rust library is located",
+                 "PATH"),
     )
 }
 
@@ -709,9 +738,13 @@ pub fn build_session_options(matches: &getopts::Matches) -> Options {
                                  matches.opt_str("dep-info")
                                         .map(|p| Path::new(p)));
 
-    let print_metas = (matches.opt_present("crate-id"),
-                       matches.opt_present("crate-name"),
+    let print_metas = (matches.opt_present("print-crate-name"),
+                       matches.opt_present("print-file-name") ||
                        matches.opt_present("crate-file-name"));
+    if matches.opt_present("crate-file-name") {
+        early_warn("the --crate-file-name argument has been renamed to \
+                    --print-file-name");
+    }
     let cg = build_codegen_options(matches);
 
     let color = match matches.opt_str("color").as_ref().map(|s| s.as_slice()) {
@@ -727,6 +760,23 @@ pub fn build_session_options(matches: &getopts::Matches) -> Options {
                                 arg).as_slice())
         }
     };
+
+    let mut externs = HashMap::new();
+    for arg in matches.opt_strs("extern").iter() {
+        let mut parts = arg.as_slice().splitn('=', 1);
+        let name = match parts.next() {
+            Some(s) => s,
+            None => early_error("--extern value must not be empty"),
+        };
+        let location = match parts.next() {
+            Some(s) => s,
+            None => early_error("--extern value must be of the format `foo=bar`"),
+        };
+        let locs = externs.find_or_insert(name.to_string(), Vec::new());
+        locs.push(location.to_string());
+    }
+
+    let crate_name = matches.opt_str("crate-name");
 
     Options {
         crate_types: crate_types,
@@ -748,7 +798,9 @@ pub fn build_session_options(matches: &getopts::Matches) -> Options {
         write_dependency_info: write_dependency_info,
         print_metas: print_metas,
         cg: cg,
-        color: color
+        color: color,
+        externs: externs,
+        crate_name: crate_name,
     }
 }
 
@@ -772,6 +824,7 @@ mod test {
     use getopts::getopts;
     use syntax::attr;
     use syntax::attr::AttrMetaMethods;
+    use syntax::diagnostics;
 
     // When the user supplies --test we should implicitly supply --cfg test
     #[test]
@@ -781,8 +834,9 @@ mod test {
               Ok(m) => m,
               Err(f) => fail!("test_switch_implies_cfg_test: {}", f)
             };
+        let registry = diagnostics::registry::Registry::new([]);
         let sessopts = build_session_options(matches);
-        let sess = build_session(sessopts, None);
+        let sess = build_session(sessopts, None, registry);
         let cfg = build_configuration(&sess);
         assert!((attr::contains_name(cfg.as_slice(), "test")));
     }
@@ -799,8 +853,9 @@ mod test {
                 fail!("test_switch_implies_cfg_test_unless_cfg_test: {}", f)
               }
             };
+        let registry = diagnostics::registry::Registry::new([]);
         let sessopts = build_session_options(matches);
-        let sess = build_session(sessopts, None);
+        let sess = build_session(sessopts, None, registry);
         let cfg = build_configuration(&sess);
         let mut test_items = cfg.iter().filter(|m| m.name().equiv(&("test")));
         assert!(test_items.next().is_some());

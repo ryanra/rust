@@ -33,14 +33,14 @@ impl<T> DerefCounter<T> {
 }
 
 impl<T> Deref<T> for DerefCounter<T> {
-    fn deref<'a>(&'a self) -> &'a T {
+    fn deref(&self) -> &T {
         self.count_imm.set(self.count_imm.get() + 1);
         &self.value
     }
 }
 
 impl<T> DerefMut<T> for DerefCounter<T> {
-    fn deref_mut<'a>(&'a mut self) -> &'a mut T {
+    fn deref_mut(&mut self) -> &mut T {
         self.count_mut += 1;
         &mut self.value
     }
@@ -72,7 +72,7 @@ pub fn main() {
     // N.B. This is required because method lookup hasn't been performed so
     // we don't know whether the called method takes mutable self, before
     // the dereference itself is type-checked (a chicken-and-egg problem).
-    (*n).to_str();
+    (*n).to_string();
     assert_eq!(n.counts(), (2, 4));
 
     // Mutable deref used for calling a method taking &mut self.

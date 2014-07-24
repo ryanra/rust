@@ -62,7 +62,7 @@ use iter::Iterator;
 use kinds::Send;
 use libc;
 use option::{Some, None, Option};
-use owned::Box;
+use boxed::Box;
 use path::{Path, GenericPath};
 use path;
 use result::{Err, Ok};
@@ -275,11 +275,41 @@ impl File {
 /// user lacks permissions to remove the file, or if some other filesystem-level
 /// error occurs.
 pub fn unlink(path: &Path) -> IoResult<()> {
-    let err = LocalIo::maybe_raise(|io| {
-        io.fs_unlink(&path.to_c_str())
-    }).map_err(IoError::from_rtio_error);
-    err.update_err("couldn't unlink path",
-                   |e| format!("{}; path={}", e, path.display()))
+    return match do_unlink(path) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            // On unix, a readonly file can be successfully removed. On windows,
+            // however, it cannot. To keep the two platforms in line with
+            // respect to their behavior, catch this case on windows, attempt to
+            // change it to read-write, and then remove the file.
+            if cfg!(windows) && e.kind == io::PermissionDenied {
+                let stat = match stat(path) {
+                    Ok(stat) => stat,
+                    Err(..) => return Err(e),
+                };
+                if stat.perm.intersects(io::UserWrite) { return Err(e) }
+
+                match chmod(path, stat.perm | io::UserWrite) {
+                    Ok(()) => do_unlink(path),
+                    Err(..) => {
+                        // Try to put it back as we found it
+                        let _ = chmod(path, stat.perm);
+                        Err(e)
+                    }
+                }
+            } else {
+                Err(e)
+            }
+        }
+    };
+
+    fn do_unlink(path: &Path) -> IoResult<()> {
+        let err = LocalIo::maybe_raise(|io| {
+            io.fs_unlink(&path.to_c_str())
+        }).map_err(IoError::from_rtio_error);
+        err.update_err("couldn't unlink path",
+                       |e| format!("{}; path={}", e, path.display()))
+    }
 }
 
 /// Given a path, query the file system to get information about a file,
@@ -330,6 +360,11 @@ pub fn lstat(path: &Path) -> IoResult<FileStat> {
 }
 
 fn from_rtio(s: rtio::FileStat) -> FileStat {
+    #[cfg(windows)]
+    type Mode = libc::c_int;
+    #[cfg(unix)]
+    type Mode = libc::mode_t;
+
     let rtio::FileStat {
         size, kind, perm, created, modified,
         accessed, device, inode, rdev,
@@ -338,7 +373,7 @@ fn from_rtio(s: rtio::FileStat) -> FileStat {
 
     FileStat {
         size: size,
-        kind: match (kind as libc::c_int) & libc::S_IFMT {
+        kind: match (kind as Mode) & libc::S_IFMT {
             libc::S_IFREG => io::TypeFile,
             libc::S_IFDIR => io::TypeDirectory,
             libc::S_IFIFO => io::TypeNamedPipe,
@@ -915,7 +950,7 @@ mod test {
     macro_rules! error( ($e:expr, $s:expr) => (
         match $e {
             Ok(val) => fail!("Should have been an error, was {:?}", val),
-            Err(ref err) => assert!(err.to_str().as_slice().contains($s.as_slice()),
+            Err(ref err) => assert!(err.to_string().as_slice().contains($s.as_slice()),
                                     format!("`{}` did not contain `{}`", err, $s))
         }
     ) )
@@ -964,9 +999,9 @@ mod test {
             let mut read_buf = [0, .. 1028];
             let read_str = match check!(read_stream.read(read_buf)) {
                 -1|0 => fail!("shouldn't happen"),
-                n => str::from_utf8(read_buf.slice_to(n)).unwrap().to_owned()
+                n => str::from_utf8(read_buf.slice_to(n)).unwrap().to_string()
             };
-            assert_eq!(read_str, message.to_owned());
+            assert_eq!(read_str.as_slice(), message);
         }
         check!(unlink(filename));
     })
@@ -1051,7 +1086,7 @@ mod test {
         let initial_msg =   "food-is-yummy";
         let overwrite_msg =    "-the-bar!!";
         let final_msg =     "foo-the-bar!!";
-        let seek_idx = 3;
+        let seek_idx = 3i;
         let mut read_mem = [0, .. 13];
         let tmpdir = tmpdir();
         let filename = &tmpdir.join("file_rt_io_file_test_seek_and_write.txt");
@@ -1167,7 +1202,7 @@ mod test {
         for n in range(0i,3) {
             let f = dir.join(format!("{}.txt", n));
             let mut w = check!(File::create(&f));
-            let msg_str = format!("{}{}", prefix, n.to_str());
+            let msg_str = format!("{}{}", prefix, n.to_string());
             let msg = msg_str.as_slice().as_bytes();
             check!(w.write(msg));
         }
@@ -1206,8 +1241,8 @@ mod test {
         let mut cur = [0u8, .. 2];
         for f in files {
             let stem = f.filestem_str().unwrap();
-            let root = stem[0] - ('0' as u8);
-            let name = stem[1] - ('0' as u8);
+            let root = stem.as_bytes()[0] - ('0' as u8);
+            let name = stem.as_bytes()[1] - ('0' as u8);
             assert!(cur[root as uint] < name);
             cur[root as uint] = name;
         }
@@ -1585,5 +1620,13 @@ mod test {
         check!(File::create(&tmpdir.join("test")).write(bytes));
         let actual = check!(File::open(&tmpdir.join("test")).read_to_end());
         assert!(actual.as_slice() == bytes);
+    })
+
+    iotest!(fn unlink_readonly() {
+        let tmpdir = tmpdir();
+        let path = tmpdir.join("file");
+        check!(File::create(&path));
+        check!(chmod(&path, io::UserRead));
+        check!(unlink(&path));
     })
 }

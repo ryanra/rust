@@ -16,7 +16,6 @@ use ext::base;
 use ext::build::AstBuilder;
 use parse::token::InternedString;
 use parse::token;
-use rsparse = parse;
 
 use parse = fmt_macros;
 use std::collections::HashMap;
@@ -38,24 +37,24 @@ struct Context<'a, 'b> {
     ecx: &'a mut ExtCtxt<'b>,
     fmtsp: Span,
 
-    // Parsed argument expressions and the types that we've found so far for
-    // them.
+    /// Parsed argument expressions and the types that we've found so far for
+    /// them.
     args: Vec<Gc<ast::Expr>>,
     arg_types: Vec<Option<ArgumentType>>,
-    // Parsed named expressions and the types that we've found for them so far.
-    // Note that we keep a side-array of the ordering of the named arguments
-    // found to be sure that we can translate them in the same order that they
-    // were declared in.
+    /// Parsed named expressions and the types that we've found for them so far.
+    /// Note that we keep a side-array of the ordering of the named arguments
+    /// found to be sure that we can translate them in the same order that they
+    /// were declared in.
     names: HashMap<String, Gc<ast::Expr>>,
     name_types: HashMap<String, ArgumentType>,
     name_ordering: Vec<String>,
 
-    // Collection of the compiled `rt::Piece` structures
+    /// Collection of the compiled `rt::Piece` structures
     pieces: Vec<Gc<ast::Expr>>,
     name_positions: HashMap<String, uint>,
     method_statics: Vec<Gc<ast::Item>>,
 
-    // Updated as arguments are consumed or methods are entered
+    /// Updated as arguments are consumed or methods are entered
     nest_level: uint,
     next_arg: uint,
 }
@@ -81,11 +80,7 @@ fn parse_args(ecx: &mut ExtCtxt, sp: Span, allow_method: bool,
     let mut names = HashMap::<String, Gc<ast::Expr>>::new();
     let mut order = Vec::new();
 
-    let mut p = rsparse::new_parser_from_tts(ecx.parse_sess(),
-                                             ecx.cfg(),
-                                             tts.iter()
-                                                .map(|x| (*x).clone())
-                                                .collect());
+    let mut p = ecx.new_parser_from_tts(tts);
     // Parse the leading function expression (maybe a block, maybe a path)
     let invocation = if allow_method {
         let e = p.parse_expr();
@@ -131,7 +126,7 @@ fn parse_args(ecx: &mut ExtCtxt, sp: Span, allow_method: bool,
                 _ => {
                     ecx.span_err(p.span,
                                  format!("expected ident for named argument, but found `{}`",
-                                         p.this_token_to_str()).as_slice());
+                                         p.this_token_to_string()).as_slice());
                     return (invocation, None);
                 }
             };
@@ -220,12 +215,21 @@ impl<'a, 'b> Context<'a, 'b> {
         }
     }
 
+    fn describe_num_args(&self) -> String {
+        match self.args.len() {
+            0 => "no arguments given".to_string(),
+            1 => "there is 1 argument".to_string(),
+            x => format!("there are {} arguments", x),
+        }
+    }
+
     fn verify_arg_type(&mut self, arg: Position, ty: ArgumentType) {
         match arg {
             Exact(arg) => {
                 if self.args.len() <= arg {
-                    let msg = format!("invalid reference to argument `{}` (there \
-                                    are {} arguments)", arg, self.args.len());
+                    let msg = format!("invalid reference to argument `{}` ({:s})",
+                                      arg, self.describe_num_args());
+
                     self.ecx.span_err(self.fmtsp, msg.as_slice());
                     return;
                 }
@@ -695,7 +699,7 @@ pub fn expand_preparsed_format_args(ecx: &mut ExtCtxt, sp: Span,
         fmtsp: sp,
     };
     cx.fmtsp = efmt.span;
-    let fmt = match expr_to_str(cx.ecx,
+    let fmt = match expr_to_string(cx.ecx,
                                 efmt,
                                 "format argument must be a string literal.") {
         Some((fmt, _)) => fmt,
