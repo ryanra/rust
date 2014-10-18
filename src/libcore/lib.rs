@@ -148,3 +148,8 @@ mod std {
     pub use option;
     pub use fmt;
 }
+
+// TODO(ryan): figure out what to do with these:
+#[lang = "stack_exhausted"] extern fn stack_exhausted() {}
+#[lang = "eh_personality"] extern fn eh_personality() {}
+#[lang = "fail_fmt"] extern fn fail_fmt(fmt: &fmt::Arguments, file: &'static str, line: uint) -> ! { loop {} }

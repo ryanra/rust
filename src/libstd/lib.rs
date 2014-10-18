@@ -248,14 +248,8 @@ pub mod fmt;
 
 // FIXME #7809: This shouldn't be pub, and it should be reexported under 'unstable'
 // but name resolution doesn't work without it being pub.
-<<<<<<< HEAD
-pub mod rt;
-mod failure;
-=======
-#[unstable]
 #[cfg(not(kernel))] pub mod rt;
 #[cfg(not(kernel))] mod failure;
->>>>>>> - removed dependencies so that can have a freestanding std
 
 // A curious inner-module that's not exported that contains the binding
 // 'std' so that macro-expanded references to std::error and such
@@ -270,17 +264,10 @@ mod std {
     
     #[cfg(not(kernel))] pub use comm; // used for select!()
     pub use fmt; // used for any formatting strings
-<<<<<<< HEAD
-    pub use io; // used for println!()
-    pub use local_data; // used for local_data_key!()
-    pub use option; // used for bitflags!{}
-    pub use rt; // used for fail!()
-=======
     #[cfg(not(kernel))] pub use io; // used for println!()
     #[cfg(not(kernel))] pub use local_data; // used for local_data_key!()
     pub use option; // used for bitflags!()
     #[cfg(not(kernel))] pub use rt; // used for fail!()
->>>>>>> - removed dependencies so that can have a freestanding std
     pub use vec; // used for vec![]
 
     // The test runner calls ::std::os::args() but really wants realstd
@@ -288,14 +275,5 @@ mod std {
     // The test runner requires std::slice::Vector, so re-export std::slice just for it.
     #[cfg(test)] pub use slice;
 
-<<<<<<< HEAD
     pub use collections; // vec!() uses MutableSeq
-=======
-#[deprecated]
-#[allow(missing_doc)]
-#[doc(hiden)]
-pub mod unstable {
-    #[deprecated = "use std::dynamic_lib"]
-    #[cfg(not(kernel))] pub use dynamic_lib;
->>>>>>> - removed dependencies so that can have a freestanding std
 }

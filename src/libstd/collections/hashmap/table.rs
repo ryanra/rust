@@ -22,7 +22,7 @@ use ops::{Deref, DerefMut, Drop};
 use option::{Some, None, Option};
 use ptr::{RawPtr, copy_nonoverlapping_memory, zero_memory};
 use ptr;
-use rt::heap::{allocate, deallocate};
+use alloc::heap::{allocate, deallocate};
 
 static EMPTY_BUCKET: u64 = 0u64;
 

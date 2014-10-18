@@ -265,12 +265,6 @@ pub use self::buffered::{BufferedReader, BufferedWriter, BufferedStream,
                          LineBufferedWriter};
 #[cfg(not(kernel))] pub use self::comm_adapters::{ChanReader, ChanWriter};
 
-<<<<<<< HEAD
-=======
-// this comes first to get the iotest! macro
-#[cfg(not(kernel))] pub mod test;
-
->>>>>>> - removed dependencies so that can have a freestanding std
 mod buffered;
 #[cfg(not(kernel))]  mod comm_adapters;
 mod mem;

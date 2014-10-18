@@ -66,6 +66,7 @@
 pub use core_collections::hash::{Hash, Hasher, Writer, hash, sip};
 
 use default::Default;
+use core_rand::isaac::IsaacRng;
 use rand::Rng;
 use rand;
 
@@ -80,7 +81,7 @@ impl RandomSipHasher {
     /// Construct a new `RandomSipHasher` that is initialized with random keys.
     #[inline]
     pub fn new() -> RandomSipHasher {
-        let mut r = rand::task_rng();
+        let mut r = rand::IsaacRng::new_unseeded();
         let r0 = r.gen();
         let r1 = r.gen();
         RandomSipHasher {

@@ -89,9 +89,6 @@
 #if defined(__linux__) || defined(__FreeBSD__)
 	.hidden MORESTACK
 #else
-#if defined(__APPLE__)
-	.private_extern MORESTACK
-#endif
 #endif
 
 #ifdef __ELF__

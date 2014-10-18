@@ -50,7 +50,7 @@ pub fn fail_no_rt() -> ! {
 
 #[macro_export]
 macro_rules! fail(
-    () => ({
+    () => (
         fail!("explicit failure")
     );
     ($msg:expr) => (
@@ -74,7 +74,7 @@ macro_rules! fail(
         // insufficient, since the user may have
         // `#[forbid(dead_code)]` and which cannot be overridden.
         #[inline(always)]
-        fn run_fmt(_: &::std::fmt::Arguments) -> ! {
+        fn _run_fmt(_: &::std::fmt::Arguments) -> ! {
             ::std::macros::fail_no_rt()
         }
         format_args!(_run_fmt, $fmt, $($arg)*)

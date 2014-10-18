@@ -15,8 +15,7 @@
 #![experimental]
 
 // All platforms need to link to rustrt
-#[cfg(not(test))]
-#[cfg(not(kernel))]
+#[cfg(all(not(test), not(kernel)))]
 #[link(name = "rust_builtin", kind = "static")]
 extern {}
 
