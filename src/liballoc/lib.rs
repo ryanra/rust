@@ -91,7 +91,7 @@ pub use boxed as owned;
 // Heaps provided for low-level allocation strategies
 
 pub mod heap;
-#[cfg(not(kernel))] pub mod libc_heap;
+#[cfg(not(feature = "rustos"))] pub mod libc_heap;
 
 // Primitive types using the heaps above
 

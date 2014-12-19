@@ -34,36 +34,36 @@ extern crate collections;
 
 #[cfg(test)] #[phase(plugin, link)] extern crate std;
 
-#[cfg(not(kernel))] pub use self::util::{Stdio, Stdout, Stderr};
-#[cfg(not(kernel))] pub use self::unwind::{begin_unwind, begin_unwind_fmt};
+#[cfg(not(feature = "rustos"))] pub use self::util::{Stdio, Stdout, Stderr};
+#[cfg(not(feature = "rustos"))] pub use self::unwind::{begin_unwind, begin_unwind_fmt};
 
 use core::prelude::*;
 
 use alloc::boxed::Box;
 use core::any::Any;
 
-#[cfg(not(kernel))] use task::{Task, BlockedTask, TaskOpts};
+#[cfg(not(feature = "rustos"))] use task::{Task, BlockedTask, TaskOpts};
 
 mod macros;
 
-#[cfg(not(kernel))] mod at_exit_imp;
-#[cfg(not(kernel))] mod local_ptr;
-#[cfg(not(kernel))] mod thread_local_storage;
+#[cfg(not(feature = "rustos"))] mod at_exit_imp;
+#[cfg(not(feature = "rustos"))] mod local_ptr;
+#[cfg(not(feature = "rustos"))] mod thread_local_storage;
 mod util;
-#[cfg(not(kernel))] mod libunwind;
+#[cfg(not(feature = "rustos"))] mod libunwind;
 
-#[cfg(not(kernel))] pub mod args;
-#[cfg(not(kernel))] pub mod bookkeeping;
+#[cfg(not(feature = "rustos"))] pub mod args;
+#[cfg(not(feature = "rustos"))] pub mod bookkeeping;
 pub mod c_str;
-#[cfg(not(kernel))] pub mod exclusive;
-#[cfg(not(kernel))] pub mod local;
-#[cfg(not(kernel))] pub mod local_data;
-#[cfg(not(kernel))] pub mod mutex;
-#[cfg(not(kernel))] pub mod rtio;
-#[cfg(not(kernel))] pub mod stack;
-#[cfg(not(kernel))] pub mod task;
-#[cfg(not(kernel))] pub mod thread;
-#[cfg(not(kernel))] pub mod unwind;
+#[cfg(not(feature = "rustos"))] pub mod exclusive;
+#[cfg(not(feature = "rustos"))] pub mod local;
+#[cfg(not(feature = "rustos"))] pub mod local_data;
+#[cfg(not(feature = "rustos"))] pub mod mutex;
+#[cfg(not(feature = "rustos"))] pub mod rtio;
+#[cfg(not(feature = "rustos"))] pub mod stack;
+#[cfg(not(feature = "rustos"))] pub mod task;
+#[cfg(not(feature = "rustos"))] pub mod thread;
+#[cfg(not(feature = "rustos"))] pub mod unwind;
 
 /// The interface to the current runtime.
 ///
@@ -72,7 +72,7 @@ pub mod c_str;
 /// implement this trait. The goal of this trait is to encompass all the
 /// fundamental differences in functionality between the 1:1 and M:N runtime
 /// modes.
-#[cfg(not(kernel))]
+#[cfg(not(feature = "rustos"))]
 pub trait Runtime {
     // Necessary scheduling functions, used for channels and blocking I/O
     // (sometimes).
@@ -107,7 +107,7 @@ pub static DEFAULT_ERROR_CODE: int = 101;
 ///
 /// Initializes global state, including frobbing the crate's logging flags,
 /// and storing the process arguments.
-#[cfg(not(kernel))]
+#[cfg(not(feature = "rustos"))]
 pub fn init(argc: int, argv: *const *const u8) {
     // FIXME: Derefing these pointers is not safe.
     // Need to propagate the unsafety to `start`.
@@ -136,7 +136,7 @@ pub fn init(argc: int, argv: *const *const u8) {
 ///
 /// It is forbidden for procedures to register more `at_exit` handlers when they
 /// are running, and doing so will lead to a process abort.
-#[cfg(not(kernel))]
+#[cfg(not(feature = "rustos"))]
 pub fn at_exit(f: proc():Send) {
     at_exit_imp::push(f);
 }
@@ -150,7 +150,7 @@ pub fn at_exit(f: proc():Send) {
 ///
 /// Invoking cleanup while portions of the runtime are still in use may cause
 /// undefined behavior.
-#[cfg(not(kernel))]
+#[cfg(not(feature = "rustos"))]
 pub unsafe fn cleanup() {
     bookkeeping::wait_for_other_tasks();
     at_exit_imp::run();
@@ -159,7 +159,7 @@ pub unsafe fn cleanup() {
 }
 
 // FIXME: these probably shouldn't be public...
-#[cfg(not(kernel))]
+#[cfg(not(feature = "rustos"))]
 #[doc(hidden)]
 pub mod shouldnt_be_public {
     #[cfg(not(test))]

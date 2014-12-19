@@ -231,10 +231,10 @@ use libc;
 use mem::transmute;
 use ops::{BitOr, BitXor, BitAnd, Sub, Not};
 use option::{Option, Some, None};
-#[cfg(not(kernel))] use os;
+#[cfg(not(feature = "rustos"))] use os;
 use boxed::Box;
 use result::{Ok, Err, Result};
-#[cfg(not(kernel))] use rt::rtio;
+#[cfg(not(feature = "rustos"))] use rt::rtio;
 use slice::{AsSlice, ImmutableSlice};
 use str::{Str, StrSlice};
 use str;
@@ -244,40 +244,40 @@ use unicode::char::UnicodeChar;
 use vec::Vec;
 
 // Reexports
-#[cfg(not(kernel))] pub use self::stdio::stdin;
-#[cfg(not(kernel))] pub use self::stdio::stdout;
-#[cfg(not(kernel))] pub use self::stdio::stderr;
-#[cfg(not(kernel))] pub use self::stdio::print;
-#[cfg(not(kernel))] pub use self::stdio::println;
+#[cfg(not(feature = "rustos"))] pub use self::stdio::stdin;
+#[cfg(not(feature = "rustos"))] pub use self::stdio::stdout;
+#[cfg(not(feature = "rustos"))] pub use self::stdio::stderr;
+#[cfg(not(feature = "rustos"))] pub use self::stdio::print;
+#[cfg(not(feature = "rustos"))] pub use self::stdio::println;
 
-#[cfg(not(kernel))] pub use self::fs::File;
-#[cfg(not(kernel))] pub use self::timer::Timer;
-#[cfg(not(kernel))] pub use self::net::ip::IpAddr;
-#[cfg(not(kernel))] pub use self::net::tcp::TcpListener;
-#[cfg(not(kernel))] pub use self::net::tcp::TcpStream;
-#[cfg(not(kernel))] pub use self::net::udp::UdpStream;
-#[cfg(not(kernel))] pub use self::pipe::PipeStream;
-#[cfg(not(kernel))] pub use self::process::{Process, Command};
-#[cfg(not(kernel))] pub use self::tempfile::TempDir;
+#[cfg(not(feature = "rustos"))] pub use self::fs::File;
+#[cfg(not(feature = "rustos"))] pub use self::timer::Timer;
+#[cfg(not(feature = "rustos"))] pub use self::net::ip::IpAddr;
+#[cfg(not(feature = "rustos"))] pub use self::net::tcp::TcpListener;
+#[cfg(not(feature = "rustos"))] pub use self::net::tcp::TcpStream;
+#[cfg(not(feature = "rustos"))] pub use self::net::udp::UdpStream;
+#[cfg(not(feature = "rustos"))] pub use self::pipe::PipeStream;
+#[cfg(not(feature = "rustos"))] pub use self::process::{Process, Command};
+#[cfg(not(feature = "rustos"))] pub use self::tempfile::TempDir;
 
 pub use self::mem::{MemReader, BufReader, MemWriter, BufWriter};
 pub use self::buffered::{BufferedReader, BufferedWriter, BufferedStream,
                          LineBufferedWriter};
-#[cfg(not(kernel))] pub use self::comm_adapters::{ChanReader, ChanWriter};
+#[cfg(not(feature = "rustos"))] pub use self::comm_adapters::{ChanReader, ChanWriter};
 
 mod buffered;
-#[cfg(not(kernel))]  mod comm_adapters;
+#[cfg(not(feature = "rustos"))]  mod comm_adapters;
 mod mem;
 mod result;
-#[cfg(not(kernel))]  mod tempfile;
+#[cfg(not(feature = "rustos"))]  mod tempfile;
 pub mod extensions;
-#[cfg(not(kernel))] pub mod fs;
-#[cfg(not(kernel))] pub mod net;
-#[cfg(not(kernel))] pub mod pipe;
-#[cfg(not(kernel))] pub mod process;
-#[cfg(not(kernel))] pub mod stdio;
-#[cfg(not(kernel))] pub mod test;
-#[cfg(not(kernel))] pub mod timer;
+#[cfg(not(feature = "rustos"))] pub mod fs;
+#[cfg(not(feature = "rustos"))] pub mod net;
+#[cfg(not(feature = "rustos"))] pub mod pipe;
+#[cfg(not(feature = "rustos"))] pub mod process;
+#[cfg(not(feature = "rustos"))] pub mod stdio;
+#[cfg(not(feature = "rustos"))] pub mod test;
+#[cfg(not(feature = "rustos"))] pub mod timer;
 pub mod util;
 
 /// The default buffer size for various I/O operations
@@ -405,12 +405,12 @@ impl IoError {
     /// descheduling or migration (other than that performed by the
     /// operating system) between the call(s) for which errors are
     /// being checked and the call of this function.
-    #[cfg(not(kernel))]
+    #[cfg(not(feature = "rustos"))]
     pub fn last_error() -> IoError {
         IoError::from_errno(os::errno() as uint, true)
     }
 
-    #[cfg(not(kernel))]
+    #[cfg(not(feature = "rustos"))]
     fn from_rtio_error(err: rtio::IoError) -> IoError {
         let rtio::IoError { code, extra, detail } = err;
         let mut ioerr = IoError::from_errno(code, false);

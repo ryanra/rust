@@ -126,7 +126,7 @@ extern crate unicode;
 extern crate core;
 extern crate "collections" as core_collections;
 extern crate "rand" as core_rand;
-#[cfg(not(kernel))] extern crate "sync" as core_sync;
+#[cfg(not(feature = "rustos"))] extern crate "sync" as core_sync;
 extern crate libc;
 extern crate rustrt;
 
@@ -176,11 +176,11 @@ pub use core_collections::str;
 pub use core_collections::string;
 pub use core_collections::vec;
 
-#[cfg(not(kernel))] pub use rustrt::c_str;
-#[cfg(not(kernel))] pub use rustrt::local_data;
+#[cfg(not(feature = "rustos"))] pub use rustrt::c_str;
+#[cfg(not(feature = "rustos"))] pub use rustrt::local_data;
 
 pub use unicode::char;
-#[cfg(not(kernel))] pub use core_sync::comm;
+#[cfg(not(feature = "rustos"))] pub use core_sync::comm;
 
 /* Exported macros */
 
@@ -234,22 +234,22 @@ pub mod hash;
 
 /* Tasks and communication */
 
-#[cfg(not(kernel))] pub mod task;
-#[cfg(not(kernel))] pub mod sync;
+#[cfg(not(feature = "rustos"))] pub mod task;
+#[cfg(not(feature = "rustos"))] pub mod sync;
 
 /* Runtime and platform support */
  
-#[cfg(not(kernel))] pub mod c_vec;
-#[cfg(not(kernel))] pub mod dynamic_lib;
-#[cfg(not(kernel))] pub mod os;
+#[cfg(not(feature = "rustos"))] pub mod c_vec;
+#[cfg(not(feature = "rustos"))] pub mod dynamic_lib;
+#[cfg(not(feature = "rustos"))] pub mod os;
 pub mod io;
-#[cfg(not(kernel))] pub mod path;
+#[cfg(not(feature = "rustos"))] pub mod path;
 pub mod fmt;
 
 // FIXME #7809: This shouldn't be pub, and it should be reexported under 'unstable'
 // but name resolution doesn't work without it being pub.
-#[cfg(not(kernel))] pub mod rt;
-#[cfg(not(kernel))] mod failure;
+#[cfg(not(feature = "rustos"))] pub mod rt;
+#[cfg(not(feature = "rustos"))] mod failure;
 
 // A curious inner-module that's not exported that contains the binding
 // 'std' so that macro-expanded references to std::error and such
@@ -262,12 +262,12 @@ mod std {
     pub use hash;
     pub use macros;
     
-    #[cfg(not(kernel))] pub use comm; // used for select!()
+    #[cfg(not(feature = "rustos"))] pub use comm; // used for select!()
     pub use fmt; // used for any formatting strings
-    #[cfg(not(kernel))] pub use io; // used for println!()
-    #[cfg(not(kernel))] pub use local_data; // used for local_data_key!()
+    #[cfg(not(feature = "rustos"))] pub use io; // used for println!()
+    #[cfg(not(feature = "rustos"))] pub use local_data; // used for local_data_key!()
     pub use option; // used for bitflags!()
-    #[cfg(not(kernel))] pub use rt; // used for fail!()
+    #[cfg(not(feature = "rustos"))] pub use rt; // used for fail!()
     pub use vec; // used for vec![]
 
     // The test runner calls ::std::os::args() but really wants realstd

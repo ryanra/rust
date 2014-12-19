@@ -119,7 +119,7 @@ static MIN_ALIGN: uint = 8;
           target_arch = "x86_64"))]
 static MIN_ALIGN: uint = 16;
 
-#[cfg(kernel)]
+#[cfg(feature = "rustos")]
 mod imp {
 
     use core::ptr::{RawPtr};
@@ -173,7 +173,7 @@ mod imp {
 }
 
 
-#[cfg(not(kernel), jemalloc)]
+#[cfg(not(feature = "rustos"), jemalloc)]
 mod imp {
     use core::option::{None, Option};
     use core::ptr::{RawPtr, null_mut, null};
@@ -266,7 +266,7 @@ mod imp {
     }
 }
 
-#[cfg(all(not(jemalloc), not(kernel), unix))]
+#[cfg(all(not(jemalloc), not(feature = "rustos"), unix))]
 mod imp {
     use core::cmp;
     use core::ptr;
@@ -328,7 +328,7 @@ mod imp {
     pub fn stats_print() {}
 }
 
-#[cfg(all(not(jemalloc), not(kernel), windows))]
+#[cfg(all(not(jemalloc), not(feature = "rustos"), windows))]
 mod imp {
     use libc::{c_void, size_t};
     use libc;
