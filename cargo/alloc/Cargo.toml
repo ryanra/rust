@@ -1,0 +1,17 @@
+[package]
+name = "alloc"
+version = "0.0.1"
+authors = []
+
+
+[dependencies.core]
+git = "https://github.com/RustOS-Fork-Holding-Ground/rust.git"
+
+[features]
+default  = []
+external_funcs = []
+external_crate = [ "external" ]
+
+[dependencies.external]
+git = "https://github.com/RustOS-Fork-Holding-Ground/RustOS.git"
+optional = true

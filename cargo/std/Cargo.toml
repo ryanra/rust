@@ -1,0 +1,20 @@
+[package]
+name = "collections"
+version = "0.0.1"
+authors = []
+
+
+[dependencies.core]
+git = "https://github.com/RustOS-Fork-Holding-Ground/rust.git"
+
+[dependencies.alloc]
+git = "https://github.com/RustOS-Fork-Holding-Ground/rust.git"
+
+[dependencies.rand]
+git = "https://github.com/RustOS-Fork-Holding-Ground/rust.git"
+
+[dependencies.unicode]
+git = "https://github.com/RustOS-Fork-Holding-Ground/rust.git"
+
+[dependencies.collections]
+git = "https://github.com/RustOS-Fork-Holding-Ground/rust.git"

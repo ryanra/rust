@@ -1,0 +1,8 @@
+[package]
+name = "rand"
+version = "0.0.1"
+authors = []
+
+
+[dependencies.core]
+git = "https://github.com/RustOS-Fork-Holding-Ground/rust.git"
