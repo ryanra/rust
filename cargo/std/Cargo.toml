@@ -1,20 +1,20 @@
 [package]
-name = "collections"
+name = "std"
 version = "0.0.1"
 authors = []
 
 
 [dependencies.core]
-git = "https://github.com/RustOS-Fork-Holding-Ground/rust.git"
+path = "../core"
 
 [dependencies.alloc]
-git = "https://github.com/RustOS-Fork-Holding-Ground/rust.git"
+path = "../alloc"
 
 [dependencies.rand]
-git = "https://github.com/RustOS-Fork-Holding-Ground/rust.git"
+path = "../rand"
 
-[dependencies.unicode]
-git = "https://github.com/RustOS-Fork-Holding-Ground/rust.git"
+[dependencies.rustc_unicode]
+path = "../unicode"
 
 [dependencies.collections]
-git = "https://github.com/RustOS-Fork-Holding-Ground/rust.git"
+path = "../collections"

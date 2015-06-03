@@ -5,7 +5,7 @@ authors = []
 
 
 [dependencies.core]
-git = "https://github.com/RustOS-Fork-Holding-Ground/rust.git"
+path = "../core"
 
 [features]
 default  = []
