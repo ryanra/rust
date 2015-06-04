@@ -13,6 +13,5 @@ external_funcs = []
 external_crate = [ "external" ]
 
 [dependencies.external]
-git = "https://github.com/ryanra/RustOS.git"
-branch = "tmp"
+path = "../../../../bump-pointer"
 optional = true
