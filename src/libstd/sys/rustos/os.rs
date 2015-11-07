@@ -94,15 +94,15 @@ pub fn env() -> Env {
     unimplemented!();
 }
 
-pub fn getenv(k: &OsStr) -> Option<OsString> {
+pub fn getenv(k: &OsStr) -> io::Result<Option<OsString>> {
     unimplemented!();
 }
 
-pub fn setenv(k: &OsStr, v: &OsStr) {
+pub fn setenv(k: &OsStr, v: &OsStr) -> io::Result<()> {
     unimplemented!();
 }
 
-pub fn unsetenv(n: &OsStr) {
+pub fn unsetenv(n: &OsStr) -> io::Result<()> {
     unimplemented!();
 }
 

@@ -239,6 +239,7 @@
 #![feature(heap_api)]
 #![feature(int_error_internals)]
 #![feature(into_cow)]
+#![feature(iter_order_deprecated)]
 #![feature(lang_items)]
 #![feature(libc)]
 #![feature(linkage, thread_local, asm)]

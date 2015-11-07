@@ -8,6 +8,7 @@ use path::{Path, PathBuf};
 
 pub struct File;
 
+#[derive(Clone)]
 pub struct FileAttr;
 
 pub struct ReadDir;
