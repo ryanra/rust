@@ -371,19 +371,7 @@ impl AsInnerMut<imp::Command> for Command {
 fn setup_io(io: &Stdio, readable: bool)
             -> io::Result<(imp::Stdio, Option<AnonPipe>, Option<AnonPipe>)>
 {
-    Ok(match io.0 {
-        StdioImp::MakePipe => {
-            let (reader, writer) = try!(pipe::anon_pipe());
-            if readable {
-                (imp::Stdio::Raw(reader.raw()), Some(writer), Some(reader))
-            } else {
-                (imp::Stdio::Raw(writer.raw()), Some(reader), Some(writer))
-            }
-        }
-        StdioImp::Raw(ref owned) => (imp::Stdio::Raw(owned.raw()), None, None),
-        StdioImp::Inherit => (imp::Stdio::Inherit, None, None),
-        StdioImp::None => (imp::Stdio::None, None, None),
-    })
+    unimplemented!();
 }
 
 /// The output of a finished process.

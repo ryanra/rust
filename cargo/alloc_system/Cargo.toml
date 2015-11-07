@@ -1,0 +1,17 @@
+[package]
+name = "alloc_system"
+version = "0.0.1"
+authors = []
+
+
+[dependencies.core]
+path = "../core"
+
+[features]
+default  = []
+external_funcs = []
+external_crate = [ "external" ]
+
+[dependencies.external]
+path = "../../../../bump-pointer"
+optional = true
