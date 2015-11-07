@@ -25,7 +25,8 @@ mod imp {
     use rand::reader::ReaderRng;
     use sys::os::errno;
 
-    #[cfg(all(target_os = "linux",
+    #[cfg(all(not(feature = "rustos"),
+              target_os = "linux",
               any(target_arch = "x86_64",
                   target_arch = "x86",
                   target_arch = "arm",
@@ -50,12 +51,13 @@ mod imp {
         }
     }
 
-    #[cfg(not(all(target_os = "linux",
+    #[cfg(any(feature = "rustos",
+              not(all(target_os = "linux",
                   any(target_arch = "x86_64",
                       target_arch = "x86",
                       target_arch = "arm",
                       target_arch = "aarch64",
-                      target_arch = "powerpc"))))]
+                      target_arch = "powerpc")))))]
     fn getrandom(_buf: &mut [u8]) -> libc::c_long { -1 }
 
     fn getrandom_fill_bytes(v: &mut [u8]) {

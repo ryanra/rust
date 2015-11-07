@@ -104,9 +104,9 @@ pub mod imp;
 pub mod imp;
 
 // i686-pc-windows-gnu and all others
-#[cfg(any(unix, all(windows, target_arch = "x86", target_env = "gnu")))]
-#[path = "gcc.rs"] #[doc(hidden)]
-pub mod imp;
+// #[cfg(any(unix, all(windows, target_arch = "x86", target_env = "gnu")))]
+// #[path = "gcc.rs"] #[doc(hidden)]
+// pub mod imp;
 
 /// Invoke a closure, capturing the cause of panic if one occurs.
 ///
@@ -145,17 +145,7 @@ pub unsafe fn try<F: FnOnce()>(f: F) -> Result<(), Box<Any + Send>> {
     // care of exposing correctly.
     unsafe fn inner_try(f: fn(*mut u8), data: *mut u8)
                         -> Result<(), Box<Any + Send>> {
-        PANIC_COUNT.with(|s| {
-            let prev = s.get();
-            s.set(0);
-            let ep = intrinsics::try(f, data);
-            s.set(prev);
-            if ep.is_null() {
-                Ok(())
-            } else {
-                Err(imp::cleanup(ep))
-            }
-        })
+        unimplemented!();
     }
 
     fn try_fn<F: FnOnce()>(opt_closure: *mut u8) {
@@ -184,7 +174,7 @@ pub fn panicking() -> bool {
 #[allow(private_no_mangle_fns)]
 fn rust_panic(cause: Box<Any + Send + 'static>) -> ! {
     unsafe {
-        imp::panic(cause)
+        unimplemented!();
     }
 }
 

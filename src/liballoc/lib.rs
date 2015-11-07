@@ -113,6 +113,9 @@
 #[cfg(stage0)]
 extern crate alloc_system;
 
+#[cfg(feature = "external")]
+extern crate external;
+
 // Allow testing this library
 
 #[cfg(test)]

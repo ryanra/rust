@@ -17,6 +17,10 @@
 
 use core::{isize, usize};
 
+#[cfg(feature = "external")]
+pub use external::{allocate, deallocate, reallocate, reallocate_inplace, usable_size};
+
+#[cfg(not(feature = "external"))]
 #[allow(improper_ctypes)]
 extern {
     #[allocator]
@@ -51,6 +55,7 @@ fn check_size_and_alignment(size: usize, align: usize) {
 /// Behavior is undefined if the requested size is 0 or the alignment is not a
 /// power of 2. The alignment must be no larger than the largest supported page
 /// size on the platform.
+#[cfg(not(feature = "external"))]
 #[inline]
 pub unsafe fn allocate(size: usize, align: usize) -> *mut u8 {
     check_size_and_alignment(size, align);
@@ -71,6 +76,7 @@ pub unsafe fn allocate(size: usize, align: usize) -> *mut u8 {
 /// The `old_size` and `align` parameters are the parameters that were used to
 /// create the allocation referenced by `ptr`. The `old_size` parameter may be
 /// any value in range_inclusive(requested_size, usable_size).
+#[cfg(not(feature = "external"))]
 #[inline]
 pub unsafe fn reallocate(ptr: *mut u8, old_size: usize, size: usize, align: usize) -> *mut u8 {
     check_size_and_alignment(size, align);
@@ -89,6 +95,7 @@ pub unsafe fn reallocate(ptr: *mut u8, old_size: usize, size: usize, align: usiz
 /// The `old_size` and `align` parameters are the parameters that were used to
 /// create the allocation referenced by `ptr`. The `old_size` parameter may be
 /// any value in range_inclusive(requested_size, usable_size).
+#[cfg(not(feature = "external"))]
 #[inline]
 pub unsafe fn reallocate_inplace(ptr: *mut u8,
                                  old_size: usize,
@@ -106,6 +113,7 @@ pub unsafe fn reallocate_inplace(ptr: *mut u8,
 /// The `old_size` and `align` parameters are the parameters that were used to
 /// create the allocation referenced by `ptr`. The `old_size` parameter may be
 /// any value in range_inclusive(requested_size, usable_size).
+#[cfg(not(feature = "external"))]
 #[inline]
 pub unsafe fn deallocate(ptr: *mut u8, old_size: usize, align: usize) {
     __rust_deallocate(ptr, old_size, align)
@@ -113,6 +121,7 @@ pub unsafe fn deallocate(ptr: *mut u8, old_size: usize, align: usize) {
 
 /// Returns the usable size of an allocation created with the specified the
 /// `size` and `align`.
+#[cfg(not(feature = "external"))]
 #[inline]
 pub fn usable_size(size: usize, align: usize) -> usize {
     unsafe { __rust_usable_size(size, align) }

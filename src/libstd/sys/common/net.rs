@@ -67,13 +67,6 @@ fn sockaddr_to_addr(storage: &libc::sockaddr_storage,
 // get_host_addresses
 ////////////////////////////////////////////////////////////////////////////////
 
-extern "system" {
-    fn getaddrinfo(node: *const c_char, service: *const c_char,
-                   hints: *const libc::addrinfo,
-                   res: *mut *mut libc::addrinfo) -> c_int;
-    fn freeaddrinfo(res: *mut libc::addrinfo);
-}
-
 pub struct LookupHost {
     original: *mut libc::addrinfo,
     cur: *mut libc::addrinfo,
@@ -97,55 +90,22 @@ unsafe impl Send for LookupHost {}
 
 impl Drop for LookupHost {
     fn drop(&mut self) {
-        unsafe { freeaddrinfo(self.original) }
+        unimplemented!();
     }
 }
 
 pub fn lookup_host(host: &str) -> io::Result<LookupHost> {
-    init();
-
-    let c_host = try!(CString::new(host));
-    let mut res = ptr::null_mut();
-    unsafe {
-        try!(cvt_gai(getaddrinfo(c_host.as_ptr(), ptr::null(), ptr::null(),
-                                 &mut res)));
-        Ok(LookupHost { original: res, cur: res })
-    }
+    unimplemented!();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // lookup_addr
 ////////////////////////////////////////////////////////////////////////////////
 
-extern "system" {
-    fn getnameinfo(sa: *const libc::sockaddr, salen: socklen_t,
-                   host: *mut c_char, hostlen: libc::size_t,
-                   serv: *mut c_char, servlen: libc::size_t,
-                   flags: c_int) -> c_int;
-}
-
 const NI_MAXHOST: usize = 1025;
 
 pub fn lookup_addr(addr: &IpAddr) -> io::Result<String> {
-    init();
-
-    let saddr = SocketAddr::new(*addr, 0);
-    let (inner, len) = saddr.into_inner();
-    let mut hostbuf = [0 as c_char; NI_MAXHOST];
-
-    let data = unsafe {
-        try!(cvt_gai(getnameinfo(inner, len,
-                                 hostbuf.as_mut_ptr(), NI_MAXHOST as libc::size_t,
-                                 ptr::null_mut(), 0, 0)));
-
-        CStr::from_ptr(hostbuf.as_ptr())
-    };
-
-    match from_utf8(data.to_bytes()) {
-        Ok(name) => Ok(name.to_owned()),
-        Err(_) => Err(io::Error::new(io::ErrorKind::Other,
-                                     "failed to lookup address information"))
-    }
+    unimplemented!();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
