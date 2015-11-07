@@ -76,12 +76,17 @@ impl OsString {
         Self::_from_bytes(bytes.into())
     }
 
-    #[cfg(unix)]
+    #[cfg(all(unix, not(feature = "rustos")))]
     fn _from_bytes(vec: Vec<u8>) -> Option<OsString> {
         use os::unix::ffi::OsStringExt;
         Some(OsString::from_vec(vec))
     }
 
+    #[cfg(feature = "rustos")]
+    fn _from_bytes(vec: Vec<u8>) -> Option<OsString> {
+        unimplemented!();
+    }
+    
     #[cfg(windows)]
     fn _from_bytes(vec: Vec<u8>) -> Option<OsString> {
         String::from_utf8(vec).ok().map(OsString::from)

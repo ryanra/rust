@@ -45,10 +45,6 @@ pub mod unwind;
 pub mod util;
 pub mod wtf8;
 
-#[cfg(any(all(unix, not(any(target_os = "macos", target_os = "ios"))),
-          all(windows, target_env = "gnu")))]
-pub mod gnu;
-
 // common error constructors
 
 /// A trait for viewing representations from std types

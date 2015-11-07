@@ -208,6 +208,7 @@
 #![feature(allow_internal_unstable)]
 #![feature(associated_consts)]
 #![feature(borrow_state)]
+#![feature(box_patterns)]
 #![feature(box_syntax)]
 #![feature(cfg_target_vendor)]
 #![feature(char_from_unchecked)]
@@ -249,6 +250,7 @@
 #![feature(dropck_parametricity)]
 #![feature(unsafe_no_drop_flag, filling_drop)]
 #![feature(decode_utf16)]
+#![feature(ptr_as_ref)]
 #![feature(unwind_attributes)]
 #![feature(vec_push_all)]
 #![feature(vec_resize)]
@@ -261,8 +263,6 @@
 
 // Don't link to std. We are std.
 #![no_std]
-
-#![deny(missing_docs)]
 
 #[cfg(test)] extern crate test;
 #[cfg(test)] #[macro_use] extern crate log;
@@ -380,10 +380,12 @@ pub mod time;
 #[macro_use]
 #[path = "sys/common/mod.rs"] mod sys_common;
 
-#[cfg(unix)]
+#[cfg(all(unix, not(feature = "rustos")))]
 #[path = "sys/unix/mod.rs"] mod sys;
 #[cfg(windows)]
 #[path = "sys/windows/mod.rs"] mod sys;
+#[cfg(feature = "rustos")]
+#[path = "sys/rustos/mod.rs"] mod sys;
 
 pub mod rt;
 mod panicking;
@@ -404,3 +406,61 @@ pub mod __rand {
 // the rustdoc documentation for primitive types. Using `include!`
 // because rustdoc only looks for these modules at the crate level.
 include!("primitive_docs.rs");
+
+// from rustos lib.rs:
+
+#[cfg(feature = "rustos")] extern crate external as bump_ptr;
+
+// not directly used, but needed to link to llvm emitted calls
+#[macro_use]
+#[cfg(feature = "rustos")]
+extern crate lazy_static;
+
+#[cfg(feature = "rustos")]
+extern crate rlibc;
+
+#[cfg(feature = "rustos")]
+#[stable(feature = "rustos", since = "0.0.1")]
+pub mod c_exports {
+
+    #[no_mangle]
+    #[stable(feature = "rustos", since = "0.0.1")]
+    pub extern "C" fn main(magic: u32, info: *mut u8) -> ! {
+        ::sys::main(magic, info);
+    }
+    
+    #[no_mangle]
+    #[stable(feature = "rustos", since = "0.0.1")]
+    pub extern "C" fn callback() {
+        ::sys::callback();
+    }
+    
+    #[no_mangle]
+    #[stable(feature = "rustos", since = "0.0.1")]
+    pub extern "C" fn unified_handler(interrupt_number: u32) {
+        ::sys::arch::cpu::unified_handler(interrupt_number);
+    }
+    
+    #[no_mangle]
+    #[stable(feature = "rustos", since = "0.0.1")]
+    pub extern "C" fn add_entry(idt: &mut ::sys::arch::idt::IDT, index: u32, f: unsafe extern "C" fn() -> ()) {
+        ::sys::arch::cpu::add_entry(idt, index, f);
+    }
+    
+    #[no_mangle]
+    #[stable(feature = "rustos", since = "0.0.1")]
+    pub extern "C" fn __morestack() {
+        ::sys::__morestack();
+    }
+    
+    #[no_mangle]
+    #[stable(feature = "rustos", since = "0.0.1")]
+    pub extern "C" fn abort() -> ! {
+        ::sys::abort();
+    }
+
+}
+
+//#[lang = "eh_personality"]
+//extern fn eh_personality() {}
+

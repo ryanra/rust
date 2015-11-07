@@ -259,37 +259,7 @@ impl Builder {
     //     value must not outlast that lifetime.
     unsafe fn spawn_inner<'a, T: Send>(self, f: Box<FnBox() -> T + Send + 'a>)
                                        -> io::Result<JoinInner<T>> {
-        let Builder { name, stack_size } = self;
-
-        let stack_size = stack_size.unwrap_or(util::min_stack());
-
-        let my_thread = Thread::new(name);
-        let their_thread = my_thread.clone();
-
-        let my_packet : Arc<UnsafeCell<Option<Result<T>>>>
-            = Arc::new(UnsafeCell::new(None));
-        let their_packet = my_packet.clone();
-
-        let main = move || {
-            if let Some(name) = their_thread.name() {
-                imp::Thread::set_name(name);
-            }
-            thread_info::set(imp::guard::current(), their_thread);
-            let mut output = None;
-            let try_result = {
-                let ptr = &mut output;
-                unwind::try(move || *ptr = Some(f()))
-            };
-            *their_packet.get() = Some(try_result.map(|()| {
-                output.unwrap()
-            }));
-        };
-
-        Ok(JoinInner {
-            native: Some(try!(imp::Thread::new(stack_size, Box::new(main)))),
-            thread: my_thread,
-            packet: Packet(my_packet),
-        })
+        unimplemented!();
     }
 }
 

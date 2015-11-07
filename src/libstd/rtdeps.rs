@@ -13,7 +13,7 @@
 //! necessary for running libstd.
 
 // A few small shims in C that haven't been translated to Rust yet
-#[cfg(all(not(test), not(windows)))]
+#[cfg(all(not(test), not(windows), not(feature = "rustos")))]
 #[link(name = "rust_builtin", kind = "static")]
 extern {}
 

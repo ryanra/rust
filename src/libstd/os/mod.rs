@@ -13,7 +13,7 @@
 #![stable(feature = "os", since = "1.0.0")]
 #![allow(missing_docs, bad_style)]
 
-#[cfg(unix)]    pub use sys::ext as unix;
+#[cfg(all(unix, not(feature = "rustos")))]    pub use sys::ext as unix;
 #[cfg(windows)] pub use sys::ext as windows;
 
 #[cfg(target_os = "android")]   pub mod android;
@@ -21,7 +21,7 @@
 #[cfg(target_os = "dragonfly")] pub mod dragonfly;
 #[cfg(target_os = "freebsd")]   pub mod freebsd;
 #[cfg(target_os = "ios")]       pub mod ios;
-#[cfg(target_os = "linux")]     pub mod linux;
+#[cfg(all(target_os = "linux", not(feature = "rustos")))]     pub mod linux;
 #[cfg(target_os = "macos")]     pub mod macos;
 #[cfg(target_os = "nacl")]      pub mod nacl;
 #[cfg(target_os = "netbsd")]   pub mod netbsd;
