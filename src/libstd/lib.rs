@@ -365,6 +365,7 @@ pub mod num;
 pub mod thread;
 
 pub mod collections;
+#[cfg(not(feature = "rustos"))]
 pub mod dynamic_lib;
 pub mod env;
 pub mod ffi;
@@ -461,6 +462,6 @@ pub mod c_exports {
 
 }
 
-//#[lang = "eh_personality"]
-//extern fn eh_personality() {}
+#[lang = "eh_personality"]
+extern fn eh_personality() {}
 
