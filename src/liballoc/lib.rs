@@ -93,6 +93,9 @@
 #![cfg_attr(not(test), feature(fused, fn_traits, placement_new_protocol))]
 #![cfg_attr(test, feature(test, box_heap))]
 
+#[cfg(feature = "external")]
+extern crate external;
+
 // Allow testing this library
 
 #[cfg(test)]

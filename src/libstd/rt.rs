@@ -27,7 +27,7 @@
 // Reexport some of our utilities which are expected by other crates.
 pub use panicking::{begin_panic, begin_panic_fmt, update_panic_count};
 
-#[cfg(not(test))]
+#[cfg(all(not(test), not(feature="rustos"))]
 #[lang = "start"]
 fn lang_start(main: *const u8, argc: isize, argv: *const *const u8) -> isize {
     use mem;
@@ -64,4 +64,10 @@ fn lang_start(main: *const u8, argc: isize, argv: *const *const u8) -> isize {
     } else {
         0
     }
+}
+
+#[cfg(feature="rustos")]
+#[lang = "start"]
+fn lang_start(_: *const u8, _: isize, _: *const *const u8) -> isize {
+    unimplemented!();
 }

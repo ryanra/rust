@@ -217,6 +217,7 @@
 #![feature(asm)]
 #![feature(associated_consts)]
 #![feature(borrow_state)]
+#![feature(box_patterns)]
 #![feature(box_syntax)]
 #![feature(cfg_target_thread_local)]
 #![feature(cfg_target_vendor)]
@@ -240,6 +241,7 @@
 #![feature(inclusive_range)]
 #![feature(int_error_internals)]
 #![feature(into_cow)]
+#![feature(iter_order_deprecated)]
 #![feature(lang_items)]
 #![feature(libc)]
 #![feature(link_args)]
@@ -277,6 +279,13 @@
 #![feature(unboxed_closures)]
 #![feature(unicode)]
 #![feature(unique)]
+<<<<<<< HEAD
+=======
+#![feature(dropck_parametricity)]
+#![feature(unsafe_no_drop_flag, filling_drop)]
+#![feature(decode_utf16)]
+#![feature(ptr_as_ref)]
+>>>>>>> 7cd503f
 #![feature(unwind_attributes)]
 #![feature(vec_push_all)]
 #![feature(zero_one)]
@@ -289,6 +298,7 @@
 // Don't link to std. We are std.
 #![no_std]
 
+<<<<<<< HEAD
 #![deny(missing_docs)]
 #![allow(unused_features)] // std may use features in a platform-specific way
 #![cfg_attr(not(stage0), deny(warnings))]
@@ -297,6 +307,8 @@
 #[allow(unused)]
 use prelude::v1::*;
 
+=======
+>>>>>>> 7cd503f
 #[cfg(test)] extern crate test;
 
 // We want to reexport a few macros from core but libcore has already been
@@ -456,10 +468,12 @@ mod memchr;
 #[macro_use]
 #[path = "sys/common/mod.rs"] mod sys_common;
 
-#[cfg(unix)]
+#[cfg(all(unix, not(feature = "rustos")))]
 #[path = "sys/unix/mod.rs"] mod sys;
 #[cfg(windows)]
 #[path = "sys/windows/mod.rs"] mod sys;
+#[cfg(feature = "rustos")]
+#[path = "sys/rustos/mod.rs"] mod sys;
 
 pub mod rt;
 mod panicking;
@@ -480,3 +494,61 @@ pub mod __rand {
 // the rustdoc documentation for primitive types. Using `include!`
 // because rustdoc only looks for these modules at the crate level.
 include!("primitive_docs.rs");
+
+// from rustos lib.rs:
+
+#[cfg(feature = "rustos")] extern crate external as bump_ptr;
+
+// not directly used, but needed to link to llvm emitted calls
+#[macro_use]
+#[cfg(feature = "rustos")]
+extern crate lazy_static;
+
+#[cfg(feature = "rustos")]
+extern crate rlibc;
+
+#[cfg(feature = "rustos")]
+#[stable(feature = "rustos", since = "0.0.1")]
+pub mod c_exports {
+
+    #[no_mangle]
+    #[stable(feature = "rustos", since = "0.0.1")]
+    pub extern "C" fn main(magic: u32, info: *mut u8) -> ! {
+        ::sys::main(magic, info);
+    }
+    
+    #[no_mangle]
+    #[stable(feature = "rustos", since = "0.0.1")]
+    pub extern "C" fn callback() {
+        ::sys::callback();
+    }
+    
+    #[no_mangle]
+    #[stable(feature = "rustos", since = "0.0.1")]
+    pub extern "C" fn unified_handler(interrupt_number: u32) {
+        ::sys::arch::cpu::unified_handler(interrupt_number);
+    }
+    
+    #[no_mangle]
+    #[stable(feature = "rustos", since = "0.0.1")]
+    pub extern "C" fn add_entry(idt: &mut ::sys::arch::idt::IDT, index: u32, f: unsafe extern "C" fn() -> ()) {
+        ::sys::arch::cpu::add_entry(idt, index, f);
+    }
+    
+    #[no_mangle]
+    #[stable(feature = "rustos", since = "0.0.1")]
+    pub extern "C" fn __morestack() {
+        ::sys::__morestack();
+    }
+    
+    #[no_mangle]
+    #[stable(feature = "rustos", since = "0.0.1")]
+    pub extern "C" fn abort() -> ! {
+        ::sys::abort();
+    }
+
+}
+
+#[lang = "eh_personality"]
+extern fn eh_personality() {}
+

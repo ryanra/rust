@@ -1,0 +1,4 @@
+[package]
+name = "rustc_bitflags"
+version = "0.0.1"
+authors = []
