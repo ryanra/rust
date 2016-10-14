@@ -125,12 +125,7 @@ impl<R: io::Read> io::Read for Maybe<R> {
 }
 
 fn handle_ebadf<T>(r: io::Result<T>, default: T) -> io::Result<T> {
-    use sys::stdio::EBADF_ERR;
-
-    match r {
-        Err(ref e) if e.raw_os_error() == Some(EBADF_ERR) => Ok(default),
-        r => r
-    }
+  unimplemented!();
 }
 
 /// A handle to the standard input stream of a process.

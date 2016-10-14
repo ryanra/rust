@@ -15,7 +15,9 @@
                       tracing garbage collector",
             issue = "27700")]
 
-use core::{isize, usize};
+#[cfg(not(feature = "external"))]
+use core::isize;
+use core::usize;
 #[cfg(not(test))]
 use core::intrinsics::{min_align_of, size_of};
 
@@ -37,6 +39,7 @@ extern "C" {
     fn __rust_usable_size(size: usize, align: usize) -> usize;
 }
 
+#[cfg(not(feature = "external"))]
 #[inline(always)]
 fn check_size_and_alignment(size: usize, align: usize) {
     debug_assert!(size != 0);

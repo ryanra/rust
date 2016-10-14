@@ -13,6 +13,8 @@ use num::One;
 use ops::Neg;
 use time::Duration;
 
+pub extern crate libc as netc;
+
 pub type wrlen_t = size_t;
 
 pub fn cvt<T: One + PartialEq + Neg<Output=T>>(t: T) -> io::Result<T> {

@@ -162,18 +162,6 @@ impl TcpStream {
         unimplemented!();
     }
 
-    pub fn set_write_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
-        unimplemented!();
-    }
-
-    pub fn read_timeout(&self) -> io::Result<Option<Duration>> {
-        unimplemented!();
-    }
-
-    pub fn write_timeout(&self) -> io::Result<Option<Duration>> {
-        unimplemented!();
-    }
-
     pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
         unimplemented!();
     }
@@ -332,6 +320,7 @@ impl UdpSocket {
 
     pub fn send_to(&self, buf: &[u8], dst: &SocketAddr) -> io::Result<usize> {
         unimplemented!();
+    }
 
     pub fn set_read_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
         unimplemented!();

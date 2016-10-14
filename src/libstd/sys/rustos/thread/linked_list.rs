@@ -876,37 +876,6 @@ impl<A> Extend<A> for LinkedList<A> {
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<A: PartialEq> PartialEq for LinkedList<A> {
-    fn eq(&self, other: &LinkedList<A>) -> bool {
-        self.len() == other.len() &&
-            iter::order::eq(self.iter(), other.iter())
-    }
-
-    fn ne(&self, other: &LinkedList<A>) -> bool {
-        self.len() != other.len() ||
-            iter::order::ne(self.iter(), other.iter())
-    }
-}
-
-#[stable(feature = "rust1", since = "1.0.0")]
-impl<A: Eq> Eq for LinkedList<A> {}
-
-#[stable(feature = "rust1", since = "1.0.0")]
-impl<A: PartialOrd> PartialOrd for LinkedList<A> {
-    fn partial_cmp(&self, other: &LinkedList<A>) -> Option<Ordering> {
-        iter::order::partial_cmp(self.iter(), other.iter())
-    }
-}
-
-#[stable(feature = "rust1", since = "1.0.0")]
-impl<A: Ord> Ord for LinkedList<A> {
-    #[inline]
-    fn cmp(&self, other: &LinkedList<A>) -> Ordering {
-        iter::order::cmp(self.iter(), other.iter())
-    }
-}
-
-#[stable(feature = "rust1", since = "1.0.0")]
 impl<A: Clone> Clone for LinkedList<A> {
     fn clone(&self) -> LinkedList<A> {
         self.iter().cloned().collect()

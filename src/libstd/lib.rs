@@ -210,7 +210,7 @@
        test(no_crate_inject, attr(deny(warnings))),
        test(attr(allow(dead_code, deprecated, unused_variables, unused_mut))))]
 
-#![needs_panic_runtime]
+//E0463#![needs_panic_runtime]
 
 #![feature(alloc)]
 #![feature(allow_internal_unstable)]
@@ -254,7 +254,7 @@
 #![feature(on_unimplemented)]
 #![feature(oom)]
 #![feature(optin_builtin_traits)]
-#![feature(panic_unwind)]
+//#![feature(panic_unwind)]
 #![feature(placement_in_syntax)]
 #![feature(prelude_import)]
 #![feature(question_mark)]
@@ -279,13 +279,6 @@
 #![feature(unboxed_closures)]
 #![feature(unicode)]
 #![feature(unique)]
-<<<<<<< HEAD
-=======
-#![feature(dropck_parametricity)]
-#![feature(unsafe_no_drop_flag, filling_drop)]
-#![feature(decode_utf16)]
-#![feature(ptr_as_ref)]
->>>>>>> 7cd503f
 #![feature(unwind_attributes)]
 #![feature(vec_push_all)]
 #![feature(zero_one)]
@@ -298,17 +291,14 @@
 // Don't link to std. We are std.
 #![no_std]
 
-<<<<<<< HEAD
 #![deny(missing_docs)]
 #![allow(unused_features)] // std may use features in a platform-specific way
-#![cfg_attr(not(stage0), deny(warnings))]
+//#![cfg_attr(not(stage0), deny(warnings))]
 
 #[prelude_import]
 #[allow(unused)]
 use prelude::v1::*;
 
-=======
->>>>>>> 7cd503f
 #[cfg(test)] extern crate test;
 
 // We want to reexport a few macros from core but libcore has already been
@@ -328,13 +318,13 @@ extern crate rustc_unicode;
 extern crate libc;
 
 // We always need an unwinder currently for backtraces
-extern crate unwind;
+//extern crate unwind;
 
 #[cfg(stage0)]
 extern crate alloc_system;
 
 // compiler-rt intrinsics
-extern crate compiler_builtins;
+//extern crate compiler_builtins;
 
 // Make std testable by not duplicating lang items and other globals. See #2912
 #[cfg(test)] extern crate std as realstd;
@@ -452,6 +442,7 @@ pub mod num;
 pub mod thread;
 
 pub mod collections;
+#[cfg(not(feature = "rustos"))]
 pub mod env;
 pub mod ffi;
 pub mod fs;
@@ -460,6 +451,7 @@ pub mod net;
 pub mod os;
 pub mod panic;
 pub mod path;
+#[cfg(not(feature = "rustos"))]
 pub mod process;
 pub mod sync;
 pub mod time;

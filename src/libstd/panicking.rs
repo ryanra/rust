@@ -207,12 +207,12 @@ impl<'a> Location<'a> {
 }
 
 fn default_hook(info: &PanicInfo) {
-    #[cfg(any(not(cargobuild), feature = "backtrace"))]
+    #[cfg(all(any(not(cargobuild), feature = "backtrace"), not(feature = "rustos")))]
     use sys_common::backtrace;
 
     // If this is a double panic, make sure that we print a backtrace
     // for this panic. Otherwise only print it if logging is enabled.
-    #[cfg(any(not(cargobuild), feature = "backtrace"))]
+    #[cfg(all(any(not(cargobuild), feature = "backtrace"), not(feature = "rustos")))]
     let log_backtrace = {
         let panics = update_panic_count(0);
 
@@ -237,7 +237,7 @@ fn default_hook(info: &PanicInfo) {
         let _ = writeln!(err, "thread '{}' panicked at '{}', {}:{}",
                          name, msg, file, line);
 
-        #[cfg(any(not(cargobuild), feature = "backtrace"))]
+        #[cfg(all(any(not(cargobuild), feature = "backtrace"), not(feature = "rustos")))]
         {
             use sync::atomic::{AtomicBool, Ordering};
 

@@ -228,3 +228,7 @@ pub fn utimes(p: &Path, atime: u64, mtime: u64) -> io::Result<()> {
 pub fn canonicalize(p: &Path) -> io::Result<PathBuf> {
      unimplemented!();
 }
+
+pub fn remove_dir_all(path: &Path) -> io::Result<()> {
+    unimplemented!();
+}

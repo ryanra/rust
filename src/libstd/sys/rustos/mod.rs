@@ -16,7 +16,11 @@ mod multiboot;
 mod pci;
 mod rtl8139;
 mod driver;
+
+pub mod args;
+pub mod memchr;
 pub mod net;
+pub mod path;
 pub mod thread;
 pub mod time;
 pub mod stdio;
@@ -26,6 +30,7 @@ pub mod backtrace;
 pub mod fs;
 pub mod process;
 pub mod os;
+pub mod rand;
 pub mod stack_overflow;
 
 pub mod mutex {
@@ -169,7 +174,6 @@ pub fn decode_error_kind(errno: i32) -> ErrorKind {
         libc::EINTR => ErrorKind::Interrupted,
         libc::EINVAL => ErrorKind::InvalidInput,
         libc::ETIMEDOUT => ErrorKind::TimedOut,
-        libc::consts::os::posix88::EEXIST => ErrorKind::AlreadyExists,
 
         // These two constants can have the same value on some systems,
         // but different values on others, so we can't use a match

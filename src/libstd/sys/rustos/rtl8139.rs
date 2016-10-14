@@ -63,18 +63,18 @@ impl Driver for Rtl8139 {
 impl NetworkDriver for Rtl8139
 {
   fn put_frame(&mut self, buf: &[u8]) -> Result<usize, Error> {
-    let slice_bytes: ::core::raw::Slice<u8> = unsafe { transmute(buf) };
+    //let slice_bytes: ::core::raw::Slice<u8> = unsafe { transmute(buf) };
 
-    trace!("sending {} bytes", slice_bytes.len);
+    trace!("sending {} bytes", buf.len());
     
 
-    self.transmit_address[self.descriptor].out_l(slice_bytes.data as u32);
+    self.transmit_address[self.descriptor].out_l(buf.as_ptr() as u32);
 
-    self.transmit_status[self.descriptor].out_l(0xfff & (slice_bytes.len as u32));
+    self.transmit_status[self.descriptor].out_l(0xfff & (buf.len() as u32));
     
     while (self.transmit_status[self.descriptor].in_l() & 0x8000) == 0 { } // TODO(ryan): this is fragile if error sending...
     self.descriptor = (self.descriptor + 1) % 4;
-    Ok(slice_bytes.len)
+    Ok(buf.len())
   }
   
   fn address(&mut self) -> [u8; 6] {
