@@ -44,12 +44,14 @@ struct IDTLayout {
   base: u32
 }
 
+#[stable(feature = "rustos", since = "0.0.1")]
 pub struct IDT {
   table: Vec<IDTEntry> 
 }
 
 impl IDT {
 
+  #[stable(feature = "rustos", since = "0.0.1")]
   pub fn new() -> IDT {
     let mut me = IDT {
       table: (0..IDT_SIZE).map(|_| IDTEntry::no_op()).collect()
@@ -60,10 +62,12 @@ impl IDT {
     me
   }
   
+  #[stable(feature = "rustos", since = "0.0.1")]
   pub fn add_entry(&mut self, index: u32, f: unsafe extern "C" fn() -> ()) {
     self.table[index as usize] = IDTEntry::new(f);
   }
   
+  #[stable(feature = "rustos", since = "0.0.1")]
   pub unsafe fn enable(&mut self) {
     let (base, _): (u32, u32) = transmute(&self.table[..]);
     let limit: u16 = (self.table.len() * size_of::<IDTEntry>()) as u16;
@@ -76,10 +80,12 @@ impl IDT {
 	:"volatile"); 
   }
   
+  #[stable(feature = "rustos", since = "0.0.1")]
   pub fn disable_interrupts() {
     unsafe { asm!("cli" :::: "volatile"); }
   }
   
+  #[stable(feature = "rustos", since = "0.0.1")]
   pub unsafe fn enable_interrupts() {
     asm!("sti" :::: "volatile");
   }

@@ -217,7 +217,7 @@ impl TcpStream {
 
 impl FromInner<Socket> for TcpStream {
     fn from_inner(socket: Socket) -> TcpStream {
-        TcpStream { inner: socket }
+        unimplemented!();
     }
 }
 
@@ -243,9 +243,7 @@ impl TcpListener {
     pub fn into_socket(self) -> Socket { unimplemented!(); }
 
     pub fn socket_addr(&self) -> io::Result<SocketAddr> {
-        sockname(|buf, len| unsafe {
-            c::getsockname(*self.inner.as_inner(), buf, len)
-        })
+        unimplemented!();
     }
 
     pub fn accept(&self) -> io::Result<(TcpStream, SocketAddr)> {
@@ -257,29 +255,27 @@ impl TcpListener {
     }
 
     pub fn set_ttl(&self, ttl: u32) -> io::Result<()> {
-        setsockopt(&self.inner, c::IPPROTO_IP, c::IP_TTL, ttl as c_int)
+        unimplemented!();
     }
 
     pub fn ttl(&self) -> io::Result<u32> {
-        let raw: c_int = getsockopt(&self.inner, c::IPPROTO_IP, c::IP_TTL)?;
-        Ok(raw as u32)
+        unimplemented!();
     }
 
     pub fn set_only_v6(&self, only_v6: bool) -> io::Result<()> {
-        setsockopt(&self.inner, c::IPPROTO_IPV6, c::IPV6_V6ONLY, only_v6 as c_int)
+        unimplemented!();
     }
 
     pub fn only_v6(&self) -> io::Result<bool> {
-        let raw: c_int = getsockopt(&self.inner, c::IPPROTO_IPV6, c::IPV6_V6ONLY)?;
-        Ok(raw != 0)
+        unimplemented!();
     }
 
     pub fn take_error(&self) -> io::Result<Option<io::Error>> {
-        self.inner.take_error()
+        unimplemented!();
     }
 
     pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
-        self.inner.set_nonblocking(nonblocking)
+        unimplemented!();
     }
 }
 
@@ -415,6 +411,10 @@ impl UdpSocket {
     }
 
     pub fn connect(&self, addr: &SocketAddr) -> io::Result<()> {
+        unimplemented!();
+    }
+    
+    pub fn duplicate(&self) -> io::Result<UdpSocket> {
         unimplemented!();
     }
 

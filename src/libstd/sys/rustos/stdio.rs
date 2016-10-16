@@ -22,6 +22,11 @@ impl Stdin {
     pub fn read(&self, data: &mut [u8]) -> io::Result<usize> {
         unimplemented!();
     }
+    
+    pub fn read_to_end(&self, buf: &mut Vec<u8>) -> io::Result<usize> {
+        unimplemented!();
+    }
+    
 }
 
 impl Stdout {

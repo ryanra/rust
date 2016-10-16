@@ -19,7 +19,7 @@
 // Backlinks over LinkedList::prev are raw pointers that form a full chain in
 // the reverse direction.
 
-#![stable(feature = "rust1", since = "1.0.0")]
+#![stable(feature = "rustos", since = "0.0.1")]
 #[macro_export]
 
 use core::prelude::*;
@@ -42,21 +42,30 @@ macro_rules! new_linked_list {
 /// A doubly-linked list.
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct LinkedList<T> {
+    #[stable(feature = "rustos", since = "0.0.1")]
     pub length: usize,
+    #[stable(feature = "rustos", since = "0.0.1")]
     pub list_head: Link<T>,
+    #[stable(feature = "rustos", since = "0.0.1")]
     pub list_tail: Rawlink<Node<T>>,
 }
 
 pub type Link<T> = Option<Box<Node<T>>>;
 
+#[stable(feature = "rustos", since = "0.0.1")]
 pub struct Rawlink<T> {
+    #[stable(feature = "rustos", since = "0.0.1")]
     pub p: *mut T,
 }
 
+#[stable(feature = "rustos", since = "0.0.1")]
 impl<T> Copy for Rawlink<T> {}
+#[stable(feature = "rustos", since = "0.0.1")]
 unsafe impl<T:Send> Send for Rawlink<T> {}
+#[stable(feature = "rustos", since = "0.0.1")]
 unsafe impl<T:Sync> Sync for Rawlink<T> {}
 
+#[stable(feature = "rustos", since = "0.0.1")]
 pub struct Node<T> {
     next: Link<T>,
     prev: Rawlink<Node<T>>,
@@ -133,6 +142,7 @@ impl<T> Rawlink<T> {
     }
 }
 
+#[stable(feature = "rustos", since = "0.0.1")]
 impl<T> Clone for Rawlink<T> {
     #[inline]
     fn clone(&self) -> Rawlink<T> {
@@ -216,7 +226,6 @@ impl<T> LinkedList<T> {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> Default for LinkedList<T> {
     #[inline]
-    #[stable(feature = "rust1", since = "1.0.0")]
     fn default() -> LinkedList<T> { LinkedList::new() }
 }
 
@@ -777,6 +786,7 @@ impl<'a, A> IterMut<'a, A> {
     ///     assert_eq!(vec, [1, 2, 3, 4]);
     /// }
     /// ```
+    #[stable(feature = "rustos", since = "0.0.1")]
     #[inline]
     pub fn insert_next(&mut self, elt: A) {
         self.insert_next_node(box Node::new(elt))
@@ -798,6 +808,7 @@ impl<'a, A> IterMut<'a, A> {
     /// // We just peeked at 2, so it was not consumed from the iterator.
     /// assert_eq!(it.next().unwrap(), &2);
     /// ```
+    #[stable(feature = "rustos", since = "0.0.1")]
     #[inline]
     pub fn peek_next(&mut self) -> Option<&mut A> {
         if self.nelem == 0 {
@@ -826,6 +837,7 @@ impl<A> DoubleEndedIterator for IntoIter<A> {
     fn next_back(&mut self) -> Option<A> { self.list.pop_back() }
 }
 
+#[stable(feature = "rustos", since = "0.0.1")]
 impl<A> ExactSizeIterator for IntoIter<A> {}
 
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -859,6 +871,7 @@ impl<'a, T> IntoIterator for &'a LinkedList<T> {
     }
 }
 
+#[stable(feature = "rustos", since = "0.0.1")]
 impl<'a, T> IntoIterator for &'a mut LinkedList<T> {
     type Item = &'a mut T;
     type IntoIter = IterMut<'a, T>;

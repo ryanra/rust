@@ -212,6 +212,7 @@
 
 //E0463#![needs_panic_runtime]
 
+#![feature(drop_types_in_const)]
 #![feature(alloc)]
 #![feature(allow_internal_unstable)]
 #![feature(asm)]
@@ -291,7 +292,7 @@
 // Don't link to std. We are std.
 #![no_std]
 
-#![deny(missing_docs)]
+//#![deny(missing_docs)]
 #![allow(unused_features)] // std may use features in a platform-specific way
 //#![cfg_attr(not(stage0), deny(warnings))]
 

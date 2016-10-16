@@ -474,6 +474,7 @@ pub fn update_count_then_panic(msg: Box<Any + Send>) -> ! {
 }
 
 /// A private no-mangle function on which to slap yer breakpoints.
+#[cfg(not(feature = "rustos"))]
 #[no_mangle]
 #[allow(private_no_mangle_fns)] // yes we get it, but we like breakpoints
 pub fn rust_panic(msg: Box<Any + Send>) -> ! {
@@ -482,4 +483,9 @@ pub fn rust_panic(msg: Box<Any + Send>) -> ! {
         __rust_start_panic(obj.data as usize, obj.vtable as usize)
     };
     rtabort!("failed to initiate panic, error {}", code)
+}
+
+#[cfg(feature = "rustos")]
+pub fn rust_panic(msg: Box<Any + Send>) -> ! {
+    unimplemented!(); // TODO(ryan): implement
 }

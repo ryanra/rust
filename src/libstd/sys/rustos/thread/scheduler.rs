@@ -153,6 +153,8 @@ impl Mutex {
     pub const fn new() -> Mutex {
         Mutex { taken: UnsafeCell::new(false), sleepers: UnsafeCell::new(new_linked_list!())}
     }
+    
+    pub unsafe fn init(&mut self) {}
 
     pub unsafe fn lock(&self) {
         cpu::current_cpu().disable_interrupts();
@@ -198,7 +200,7 @@ impl Mutex {
 unsafe impl Send for Condvar {}
 unsafe impl Sync for Condvar {}
 
-pub const CONDVAR_INIT: Condvar = Condvar { sleepers: UnsafeCell::new(new_linked_list!()) };
+//pub const CONDVAR_INIT: Condvar = Condvar { sleepers: UnsafeCell::new(new_linked_list!()) };
 
 pub struct Condvar {
     sleepers: UnsafeCell<LinkedList<Tcb>>
@@ -209,6 +211,8 @@ impl Condvar {
     pub const fn new() -> Condvar {
         unsafe { Condvar { sleepers: UnsafeCell::new(new_linked_list!()) } }
     }
+    
+    pub unsafe fn init(&mut self) {}
 
     pub unsafe fn notify_one(&self) {
         cpu::current_cpu().disable_interrupts();

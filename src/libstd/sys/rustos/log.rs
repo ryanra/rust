@@ -6,6 +6,7 @@ macro_rules! __print(
   })
 );
 
+#[stable(feature = "rustos", since = "0.0.1")]
 #[macro_export]
 macro_rules! log(
   ($lvl: expr, $($arg:tt)*) => ({
@@ -15,21 +16,25 @@ macro_rules! log(
   })
 );
 
+#[stable(feature = "rustos", since = "0.0.1")]
 #[macro_export]
 macro_rules! debug(
   ($($arg:tt)*) => (log!("DEBUG", $($arg)*))
 );
 
+#[stable(feature = "rustos", since = "0.0.1")]
 #[macro_export]
 macro_rules! warn(
   ($($arg:tt)*) => (log!("WARN", $($arg)*))
 );
 
+#[stable(feature = "rustos", since = "0.0.1")]
 #[macro_export]
 macro_rules! info(
   ($($arg:tt)*) => (log!("INFO", $($arg)*))
 );
 
+#[stable(feature = "rustos", since = "0.0.1")]
 #[macro_export]
 macro_rules! trace(
   ($($arg:tt)*) => (log!("TRACE", $($arg)*))

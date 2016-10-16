@@ -5,6 +5,7 @@ use ffi::{CString, CStr, OsString, OsStr};
 use fmt;
 use io::{self, Error, SeekFrom};
 use path::{Path, PathBuf};
+use sys::time::SystemTime;
 
 pub struct File;
 
@@ -21,12 +22,24 @@ unsafe impl Sync for Dir {}
 pub struct DirEntry;
 
 #[derive(Clone)]
-pub struct OpenOptions;
+pub struct OpenOptions {
+    // generic
+    read: bool,
+    write: bool,
+    append: bool,
+    truncate: bool,
+    create: bool,
+    create_new: bool,
+    // system-specific
+    custom_flags: i32,
+    mode: (),
+}
+
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FilePermissions ;
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct FileType;
 
 pub struct DirBuilder;
@@ -41,13 +54,17 @@ impl FileAttr {
          unimplemented!();
     }
 
-    pub fn accessed(&self) -> u64 {
+    pub fn accessed(&self) -> io::Result<SystemTime> {
          unimplemented!();
     }
-    pub fn modified(&self) -> u64 {
+    pub fn modified(&self) -> io::Result<SystemTime> {
          unimplemented!();
     }
-
+    
+    pub fn created(&self) -> io::Result<SystemTime> {
+        unimplemented!();
+    }
+    
     pub fn file_type(&self) -> FileType {
          unimplemented!();
     }
@@ -124,6 +141,10 @@ impl OpenOptions {
     pub fn create(&mut self, create: bool) {
          unimplemented!();
     }
+    
+    pub fn create_new(&mut self, create_new: bool) { 
+        self.create_new = create_new;
+    }
 
 }
 
@@ -151,6 +172,10 @@ impl File {
     pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
          unimplemented!();
     }
+    
+    pub fn read_to_end(&self, buf: &mut Vec<u8>) -> io::Result<usize> {
+        unimplemented!();
+    }
 
     pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
          unimplemented!();
@@ -161,6 +186,11 @@ impl File {
     pub fn seek(&self, pos: SeekFrom) -> io::Result<u64> {
          unimplemented!();
     }
+    
+    pub fn duplicate(&self) -> io::Result<File> {
+        unimplemented!();
+    }
+
 
 }
 
