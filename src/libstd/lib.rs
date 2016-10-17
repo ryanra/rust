@@ -330,6 +330,9 @@ extern crate alloc_system;
 // Make std testable by not duplicating lang items and other globals. See #2912
 #[cfg(test)] extern crate std as realstd;
 
+#[cfg(feature="rustos")]
+extern crate fringe;
+
 // NB: These reexports are in the order they should be listed in rustdoc
 
 #[stable(feature = "rust1", since = "1.0.0")]

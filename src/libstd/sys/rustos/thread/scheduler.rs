@@ -201,8 +201,6 @@ impl Mutex {
 unsafe impl Send for Condvar {}
 unsafe impl Sync for Condvar {}
 
-//pub const CONDVAR_INIT: Condvar = Condvar { sleepers: UnsafeCell::new(new_linked_list!()) };
-
 pub struct Condvar {
     sleepers: UnsafeCell<LinkedList<Tcb>>
 }

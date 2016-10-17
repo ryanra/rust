@@ -6,6 +6,7 @@ use self::arch::cpu;
 use self::pci::Pci;
 use self::driver::DriverManager;
 use self::thread::scheduler;
+use fringe;
 
 #[macro_use]
 mod log;
@@ -107,10 +108,30 @@ fn bootstrapped_main(magic: u32, info: *mut multiboot_info) {
         
         pci_stuff();
         
-        scheduler::thread_stuff();
+        fringe_test();
+        
+        //scheduler::thread_stuff();
         
         info!("Kernel main thread is done!");
   }
+}
+
+fn fringe_test() {
+  let mut bytes: [u8; 5000] = [0; 5000];
+
+  let stack = fringe::SliceStack::new(&mut bytes);
+  
+  unsafe {
+    let mut gen = fringe::Generator::unsafe_new(stack, move |yielder, ()| {
+        for i in 1..4 { yielder.suspend(i) }
+    });
+    
+    info!("{:?}", gen.resume(())); // Some(1)
+    info!("{:?}", gen.resume(())); // Some(2)
+    info!("{:?}", gen.resume(())); // Some(3)
+    info!("{:?}", gen.resume(())); // None
+  }
+
 }
 
 fn pci_stuff() {
