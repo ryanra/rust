@@ -69,7 +69,8 @@ unsafe impl<T:Sync> Sync for Rawlink<T> {}
 pub struct Node<T> {
     next: Link<T>,
     prev: Rawlink<Node<T>>,
-    value: T,
+    #[stable(feature = "rustos", since = "0.0.1")]
+    pub value: T,
 }
 
 /// An iterator over references to the items of a `LinkedList`.
@@ -151,9 +152,11 @@ impl<T> Clone for Rawlink<T> {
 }
 
 impl<T> Node<T> {
-    fn new(v: T) -> Node<T> {
+    #[stable(feature = "rustos", since = "0.0.1")]
+    pub fn new(v: T) -> Node<T> {
         Node{value: v, next: None, prev: Rawlink::none()}
     }
+    
 }
 
 /// Set the .prev field on `next`, then return `Some(next)`
@@ -166,8 +169,9 @@ fn link_with_prev<T>(mut next: Box<Node<T>>, prev: Rawlink<Node<T>>)
 // private methods
 impl<T> LinkedList<T> {
     /// Add a Node first in the list
+    #[stable(feature = "rustos", since = "0.0.1")]
     #[inline]
-    fn push_front_node(&mut self, mut new_head: Box<Node<T>>) {
+    pub fn push_front_node(&mut self, mut new_head: Box<Node<T>>) {
         match self.list_head {
             None => {
                 self.list_tail = Rawlink::some(&mut *new_head);
@@ -184,8 +188,9 @@ impl<T> LinkedList<T> {
     }
 
     /// Remove the first Node and return it, or None if the list is empty
+    #[stable(feature = "rustos", since = "0.0.1")]
     #[inline]
-    fn pop_front_node(&mut self) -> Option<Box<Node<T>>> {
+    pub fn pop_front_node(&mut self) -> Option<Box<Node<T>>> {
         self.list_head.take().map(|mut front_node| {
             self.length -= 1;
             match front_node.next.take() {
@@ -197,8 +202,9 @@ impl<T> LinkedList<T> {
     }
 
     /// Add a Node last in the list
+    #[stable(feature = "rustos", since = "0.0.1")]
     #[inline]
-    fn push_back_node(&mut self, mut new_tail: Box<Node<T>>) {
+    pub fn push_back_node(&mut self, mut new_tail: Box<Node<T>>) {
         match self.list_tail.resolve() {
             None => return self.push_front_node(new_tail),
             Some(tail) => {
@@ -210,8 +216,9 @@ impl<T> LinkedList<T> {
     }
 
     /// Remove the last Node and return it, or None if the list is empty
+    #[stable(feature = "rustos", since = "0.0.1")]
     #[inline]
-    fn pop_back_node(&mut self) -> Option<Box<Node<T>>> {
+    pub fn pop_back_node(&mut self) -> Option<Box<Node<T>>> {
         self.list_tail.resolve().map_or(None, |tail| {
             self.length -= 1;
             self.list_tail = tail.prev;

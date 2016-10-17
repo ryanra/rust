@@ -9,7 +9,7 @@ use time::Duration;
 
 use alloc::boxed::{Box, FnBox};
 
-use super::linked_list::LinkedList;
+use super::linked_list::{LinkedList, Node};
 
 use super::context::Context;
 use super::stack::Stack;
@@ -17,7 +17,7 @@ use super::stack::Stack;
 use super::super::arch::cpu;
 
 // thread control block
-struct Tcb { 
+struct Tcb {
   context: Context,
 }
 
@@ -96,18 +96,18 @@ impl Scheduler {
   }
   
   fn unschedule_current(&mut self) -> ! {
-    let c = |_: Tcb| { None };
+    let c = |_| { None };
     self.do_and_unschedule(c);
     unreachable!();
   }
   
-  fn do_and_unschedule<'a, F>(&mut self, mut do_something: F) where F : FnMut(Tcb) -> Option<&'a mut Tcb> {
+  fn do_and_unschedule<'a, F>(&mut self, mut do_something: F) where F : FnMut(Box<Node<Tcb>>) -> Option<&'a mut Tcb> {
     debug!("unscheduling");
     
     cpu::current_cpu().disable_interrupts();
     
     let mut empty = Tcb { context: Context::empty() };
-    let save_into = match do_something(self.queue.pop_front().unwrap()) {
+    let save_into = match do_something(self.queue.pop_front_node().unwrap()) {
         Some(tcb) => tcb,
         None => &mut empty
     };
@@ -159,9 +159,10 @@ impl Mutex {
     pub unsafe fn lock(&self) {
         cpu::current_cpu().disable_interrupts();
         while *self.taken.get() {
-            get_scheduler().do_and_unschedule(&|me: Tcb| { 
-                (*self.sleepers.get()).push_back(me);
-                Some((*self.sleepers.get()).back_mut().unwrap())
+            get_scheduler().do_and_unschedule(&|me: Box<Node<Tcb>>| { 
+                (*self.sleepers.get()).push_back_node(me);
+                let back: &mut Tcb = (*self.sleepers.get()).back_mut().unwrap();
+                Some(back)
             });
         }
         *self.taken.get() = true;
@@ -234,8 +235,8 @@ impl Condvar {
     pub unsafe fn wait(&self, mutex: &Mutex) {
         cpu::current_cpu().disable_interrupts();
         mutex.unlock();
-        get_scheduler().do_and_unschedule(&|me: Tcb| { 
-            (*self.sleepers.get()).push_back(me);
+        get_scheduler().do_and_unschedule(&|me: Box<Node<Tcb>>| { 
+            (*self.sleepers.get()).push_back_node(me);
             Some((*self.sleepers.get()).back_mut().unwrap())
         });
         mutex.lock();
