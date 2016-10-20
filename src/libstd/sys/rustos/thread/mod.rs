@@ -3,6 +3,7 @@ mod linked_list;
 pub mod scheduler;
 pub mod context;
 pub mod stack;
+mod fringe_wrapper;
 
 pub use self::scheduler::Thread;
 

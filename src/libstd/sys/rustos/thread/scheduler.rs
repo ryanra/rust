@@ -16,15 +16,8 @@ use super::stack::Stack;
 
 use super::super::arch::cpu;
 
-// thread control block
-struct Tcb {
-  context: Context,
-}
-
-// invariant: current thread is at front of queue
-pub struct Scheduler {
-  queue: LinkedList<Tcb>
-}
+use fringe;
+use super::fringe_wrapper;
 
 lazy_static! {
   static ref SCHEDULER: UnsafeCell<Scheduler> = UnsafeCell::new(Scheduler::new());
@@ -34,109 +27,90 @@ pub fn get_scheduler() -> &'static mut Scheduler {
     unsafe { transmute(SCHEDULER.get()) }
 }
 
-#[no_mangle]
-extern "C" fn run_thunk(thunk: &Fn() -> ()) {
-  debug!("in run_thunk");
-  thunk();
-  unreachable!("didn't unschedule finished thread");
+// thread control block
+struct Tcb {
+  group: fringe_wrapper::Group<'static, (), ThreadRequest, fringe::OwnedStack>,
+}
+
+unsafe impl Send for Tcb {}
+
+type F = &'static (Fn(Box<Node<Tcb>>) + Sync);
+
+// Request of thread to scheduler
+enum ThreadRequest {    
+    Yield,
+    Unschedule(F),
+    Schedule(Tcb),
+}
+
+pub struct Scheduler {
+  queue: LinkedList<Tcb>,
 }
 
 impl Scheduler {
   
-  pub fn new() -> Scheduler {
-    let idle_task = || {
-        loop {
-            trace!("in idle task 1");
-            trace!("wait done");
-            get_scheduler().switch();
-            trace!("switch done");
-            loop {}
-        }
-    };
-
-    let mut s = Scheduler { queue: LinkedList::new() }; 
-    let tcb = s.new_tcb(box idle_task);
-    s.queue.push_front(tcb);
+  fn new() -> Scheduler {
+    let mut s = Scheduler { queue: LinkedList::new()  }; 
     s
   }
   
-  pub fn bootstrap_start(&mut self) -> ! {
+  fn request(&mut self, request: ThreadRequest) {
+    debug!("suspending");
+    unsafe { self.queue.front().unwrap().group.suspend(request); }
+  }
+  
+  pub fn bootstrap_start<F>(f: F) -> ! where F: FnOnce() + Send + 'static {
+    get_scheduler().run(Self::new_tcb(f))
+  }
+  
+  fn run(&mut self, start: Tcb) -> ! {
     // scheduler now takes control of the CPU
-    // current context is discarded and front of queue is started
-    let mut dont_care = Context::empty();
-    Context::swap(&mut dont_care, &self.queue.front_mut().unwrap().context);
-    unreachable!();
-  }
-  
-  fn new_tcb(&self, func: Box<Fn() -> ()>) -> Tcb {
-    const STACK_SIZE: usize = 1024 * 1024;
-    let stack = Stack::new(STACK_SIZE);
-
-    let p = move || {
-      unsafe { cpu::current_cpu().enable_interrupts(); }
-      func();
-      get_scheduler().unschedule_current();
-    };
+    self.queue.push_front(Self::new_tcb(Self::idle));
+    self.queue.push_front(start);
     
-    let c = Context::new(run_thunk, box p as Box<Fn() -> ()>, stack);
-    Tcb { context: c }
-  }
-  
-  pub fn schedule(&mut self, func: Box<Fn() -> ()>) {
-    let new = self.new_tcb(func);
-    self.schedule_tcb(new);    
-  }
-  
-  fn schedule_tcb(&mut self, tcb: Tcb) {
-    cpu::current_cpu().disable_interrupts();
-    
-    self.queue.push_back(tcb);
-    
-    cpu::current_cpu().enable_interrupts();
-  }
-  
-  fn unschedule_current(&mut self) -> ! {
-    let c = |_| { None };
-    self.do_and_unschedule(c);
-    unreachable!();
-  }
-  
-  fn do_and_unschedule<'a, F>(&mut self, mut do_something: F) where F : FnMut(Box<Node<Tcb>>) -> Option<&'a mut Tcb> {
-    debug!("unscheduling");
-    
-    cpu::current_cpu().disable_interrupts();
-    
-    let mut empty = Tcb { context: Context::empty() };
-    let save_into = match do_something(self.queue.pop_front_node().unwrap()) {
-        Some(tcb) => tcb,
-        None => &mut empty
-    };
-    
-    let next = self.queue.pop_back().unwrap();
-    self.queue.push_front(next);
-    
-    Context::swap(&mut save_into.context, &self.queue.front().unwrap().context);
-    
-    cpu::current_cpu().enable_interrupts();
-  }
-  
-  pub fn switch(&mut self) {
-    cpu::current_cpu().disable_interrupts();
-    
-    if self.queue.len() == 1 {
-        return;
+    loop {
+        let request = unsafe { self.queue.front_mut().unwrap().group.resume(()) };
+        debug!("got request");
+        match request {
+            Some(req) => match req {
+                ThreadRequest::Yield => {
+                    debug!("Requesting yield");
+                    let current = self.queue.pop_front().unwrap();
+                    self.queue.push_back(current);
+                },
+                ThreadRequest::Unschedule(func) => {
+                    debug!("Requesting Unschedule");
+                    let node: Box<Node<Tcb>> = self.queue.pop_front_node().unwrap();
+                    func(node);
+                },
+                ThreadRequest::Schedule(tcb) => {
+                    debug!("Requesting schedule");
+                    self.queue.push_back(tcb);
+                },
+            },
+            None => {self.queue.pop_front();},
+        }
+        
     }
-    let old = self.queue.pop_front().unwrap();
-    let next = self.queue.pop_back().unwrap();
-    self.queue.push_front(next);
-    self.queue.push_back(old);
-    
-    let back: *mut Context = &mut self.queue.back_mut().unwrap().context;
-    let front = self.queue.front().unwrap();
-    Context::swap(unsafe { back.as_mut().unwrap() }, &front.context);
-    
-    unsafe { cpu::current_cpu().enable_interrupts(); } // TODO(ryan): make a mutex as enabling/disabling interrupts
   }
+  
+  fn idle() {
+    get_scheduler().request(ThreadRequest::Yield);
+    loop {
+        // TODO should idle and yield in here...
+    }
+  }
+  
+  fn new_tcb<F>(func: F) -> Tcb where F: FnOnce() + Send + 'static {
+    const STACK_SIZE: usize = 1024 * 1024;
+    let stack = fringe::OwnedStack::new(STACK_SIZE);
+  
+    unsafe {
+        Tcb { group: fringe_wrapper::Group::new(func, stack) }
+    }
+    
+  }
+  
   
 }
 
@@ -145,7 +119,7 @@ unsafe impl Sync for Mutex {}
 
 pub struct Mutex {
     taken: UnsafeCell<bool>,
-    sleepers: UnsafeCell<LinkedList<Tcb>>
+    sleepers: UnsafeCell<LinkedList<Tcb<>>>
 }
 
 impl Mutex {
@@ -159,11 +133,9 @@ impl Mutex {
     pub unsafe fn lock(&self) {
         cpu::current_cpu().disable_interrupts();
         while *self.taken.get() {
-            get_scheduler().do_and_unschedule(&|me: Box<Node<Tcb>>| { 
-                (*self.sleepers.get()).push_back_node(me);
-                let back: &mut Tcb = (*self.sleepers.get()).back_mut().unwrap();
-                Some(back)
-            });
+            //get_scheduler().request(ThreadRequest::Unschedule(&|me: Box<Node<Tcb>>| {
+            //    (*self.sleepers.get()).push_back_node(me);
+            //}));
         }
         *self.taken.get() = true;
         cpu::current_cpu().enable_interrupts();
@@ -186,10 +158,10 @@ impl Mutex {
         cpu::current_cpu().disable_interrupts();
         assert!(*self.taken.get());
         *self.taken.get() = false;
-        match (*self.sleepers.get()).pop_front() {
-            Some(tcb) => get_scheduler().schedule_tcb(tcb),
-            None => ()
-        }
+        //match (*self.sleepers.get()).pop_front() {
+        //    Some(tcb) => get_scheduler().request(ThreadRequest::Schedule(tcb)),
+        //    None => ()
+        //}
         cpu::current_cpu().enable_interrupts();
     }
     
@@ -215,10 +187,10 @@ impl Condvar {
 
     pub unsafe fn notify_one(&self) {
         cpu::current_cpu().disable_interrupts();
-        match (*self.sleepers.get()).pop_front() {
-            Some(tcb) => get_scheduler().schedule_tcb(tcb),
-            None => ()
-        }
+        //match (*self.sleepers.get()).pop_front() {
+        //    Some(tcb) => get_scheduler().request(ThreadRequest::Schedule(tcb)),
+        //    None => ()
+        //}
         cpu::current_cpu().enable_interrupts();
     }
 
@@ -233,10 +205,9 @@ impl Condvar {
     pub unsafe fn wait(&self, mutex: &Mutex) {
         cpu::current_cpu().disable_interrupts();
         mutex.unlock();
-        get_scheduler().do_and_unschedule(&|me: Box<Node<Tcb>>| { 
-            (*self.sleepers.get()).push_back_node(me);
-            Some((*self.sleepers.get()).back_mut().unwrap())
-        });
+        //get_scheduler().get_scheduler().request(ThreadRequest::Unschedule(&|me: Box<Node<Tcb>>| { 
+        //    (*self.sleepers.get()).push_back_node(me);
+        //}));
         mutex.lock();
         cpu::current_cpu().enable_interrupts();
     }
@@ -366,8 +337,8 @@ extern "C" fn test_thread() {
   inner_thread_test(11);
   unsafe {
     let s = get_scheduler();
-    debug!("leaving test thread!"); 
-    s.unschedule_current(); 
+    debug!("leaving test thread!");
+    s.request(ThreadRequest::Yield);
   }
 }
 
@@ -379,9 +350,9 @@ pub fn thread_stuff() {
     debug!("orig sched 0x{:x}", transmute_copy::<_, u32>(&s));
     //loop {};
     let t = || { test_thread() };
-    s.schedule(box t);
+    s.request(ThreadRequest::Schedule(Scheduler::new_tcb(t)));
     debug!("schedule okay");
-    s.switch();
+    s.request(ThreadRequest::Yield);
     debug!("back");
   }
 }

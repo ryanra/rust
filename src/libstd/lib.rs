@@ -509,7 +509,7 @@ pub mod c_exports {
 
     #[no_mangle]
     #[stable(feature = "rustos", since = "0.0.1")]
-    pub extern "C" fn main(magic: u32, info: *mut u8) -> ! {
+    pub extern "C" fn main(magic: u32, info: usize) -> ! {
         ::sys::main(magic, info);
     }
     

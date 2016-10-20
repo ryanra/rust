@@ -67,7 +67,7 @@ fn put_char(c: u8) {
   __print!("{}", c as char);
 }
 
-pub extern "C" fn main(magic: u32, info: *mut u8) -> ! {
+pub extern "C" fn main(magic: u32, info: usize) -> ! {
     // some preliminaries
     ::bump_ptr::set_allocator((15usize * 1024 * 1024) as *mut u8, (20usize * 1024 * 1024) as *mut u8);
     let mut c = cpu::current_cpu();
@@ -78,8 +78,7 @@ pub extern "C" fn main(magic: u32, info: *mut u8) -> ! {
         bootstrapped_main(magic, info as *mut multiboot_info); 
     };
     
-    scheduler::get_scheduler().schedule(box bootstrapped_thunk);
-    scheduler::get_scheduler().bootstrap_start(); // okay, scheduler, take it away!
+    scheduler::Scheduler::bootstrap_start(bootstrapped_thunk);
     unreachable!();
 }
 
@@ -110,7 +109,7 @@ fn bootstrapped_main(magic: u32, info: *mut multiboot_info) {
         
         fringe_test();
         
-        //scheduler::thread_stuff();
+        scheduler::thread_stuff();
         
         info!("Kernel main thread is done!");
   }
