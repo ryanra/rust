@@ -186,6 +186,11 @@ impl<T> LinkedList<T> {
         }
         self.length += 1;
     }
+    
+    #[stable(feature = "rustos", since = "0.0.1")]
+    pub fn front_node(&self) -> Option<&Box<Node<T>>> {
+        self.list_head.as_ref().map(|node| { node })
+    }
 
     /// Remove the first Node and return it, or None if the list is empty
     #[stable(feature = "rustos", since = "0.0.1")]

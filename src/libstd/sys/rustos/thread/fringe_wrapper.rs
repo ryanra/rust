@@ -4,6 +4,7 @@
 use fringe::{Generator, Stack};
 use fringe::generator::Yielder;
 use core::intrinsics::transmute;
+use core::mem::forget;
 
 pub struct Group<'a, I, O, S: Stack> where I: Send + 'a, O: Send + 'a {
     generator: Generator<'a, I, O, S>,
@@ -22,14 +23,15 @@ impl<'a, I, O, S: Stack> Group<'a, I, O, S> where I: Send + 'a, O: Send + 'a, S:
         // the hassel...
         let mut yielder_ptr: &usize = &0;
         let mut yielder_usize: usize = transmute(yielder_ptr);
-        let mut gen = Generator::unsafe_new(stack, move |yielder, _| {
+        let mut gen = Generator::unsafe_new(stack, move |yielder, init| {
+            forget(init);
             *transmute::<_, *mut usize>(yielder_usize) = transmute(yielder);
             //info!("inner yielder at 0x{:x}", *transmute(yielder_usize));
             yielder.suspend(zero());
             f();
         });
         
-        gen.resume(zero());
+        forget(gen.resume(zero()));
         info!("got yielder at 0x{:x}", *yielder_ptr);
         Group { generator: gen, yielder: transmute(*yielder_ptr)}
     }

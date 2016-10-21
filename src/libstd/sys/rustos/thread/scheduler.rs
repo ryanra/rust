@@ -1,7 +1,7 @@
 // TODO(ryan): it really looks like bulk of libgreen could be used here where pthread <-> core
 
 use core::prelude::*;
-use core::cell::UnsafeCell;
+use core::cell::{UnsafeCell, Cell};
 use core::mem::{transmute, transmute_copy};
 use core::ptr;
 use io;
@@ -29,20 +29,31 @@ pub fn get_scheduler() -> &'static mut Scheduler {
 
 // thread control block
 struct Tcb {
-  group: fringe_wrapper::Group<'static, (), ThreadRequest, fringe::OwnedStack>,
+  group: fringe_wrapper::Group<'static, ThreadResponse, ThreadRequest, fringe::OwnedStack>,
 }
 
 unsafe impl Send for Tcb {}
 
-type F = &'static (Fn(Box<Node<Tcb>>) + Sync);
-
 // Request of thread to scheduler
-enum ThreadRequest {    
+enum ThreadRequest {
     Yield,
-    Unschedule(F),
-    Schedule(Tcb),
+    StageUnschedule,                // Request to be unscheduled and get a Node container Tcb
+    Schedule(Box<Node<Tcb>>),  // Schedule a Tcb
+    CompleteUnschedule,                    // After unscheduling self, must send this message
 }
 
+// Response
+enum ThreadResponse {
+    Nothing,
+    Unscheduled(Box<Node<Tcb>>)
+}
+
+// Notes that the scheduler thread cannot do any allocations (because
+// eventually allocations will require a lock which will be implemented
+// with the scheduler itself). Further, the locks cannot do any allocations
+// themselves because it causes a cyclic dependency with the allocator.
+// The solution is to pass around Box<Node<Tcb>>'s which have their
+// memory pre-allocated to them.
 pub struct Scheduler {
   queue: LinkedList<Tcb>,
 }
@@ -54,41 +65,74 @@ impl Scheduler {
     s
   }
   
-  fn request(&mut self, request: ThreadRequest) {
+  fn request(&mut self, request: ThreadRequest) -> ThreadResponse {
     debug!("suspending");
-    unsafe { self.queue.front().unwrap().group.suspend(request); }
+    unsafe { self.current_tcb().group.suspend(request) }
+  }
+  
+  fn do_and_unschedule<F>(&mut self, f: F) where F: FnOnce(Box<Node<Tcb>>) {
+    let my_tcb = match self.request(ThreadRequest::StageUnschedule) {
+        ThreadResponse::Unscheduled(x) => x,
+        _ => unreachable!(),
+    };
+    f(my_tcb);
+    self.request(ThreadRequest::CompleteUnschedule);
+  }
+  
+  fn current_tcb(&self) -> &Tcb {
+    self.queue.front().unwrap()
   }
   
   pub fn bootstrap_start<F>(f: F) -> ! where F: FnOnce() + Send + 'static {
     get_scheduler().run(Self::new_tcb(f))
   }
   
-  fn run(&mut self, start: Tcb) -> ! {
+  fn run(&mut self, start: Box<Node<Tcb>>) -> ! {
     // scheduler now takes control of the CPU
-    self.queue.push_front(Self::new_tcb(Self::idle));
-    self.queue.push_front(start);
-    
+    self.queue.push_front_node(Self::new_tcb(Self::idle));
+    self.queue.push_front_node(start);
+
+    let mut response = ThreadResponse::Nothing;
     loop {
-        let request = unsafe { self.queue.front_mut().unwrap().group.resume(()) };
+        let request = unsafe { 
+            self.queue.front_mut().unwrap().group.resume(response) 
+        };
         debug!("got request");
-        match request {
+        response = match request {
             Some(req) => match req {
                 ThreadRequest::Yield => {
                     debug!("Requesting yield");
-                    let current = self.queue.pop_front().unwrap();
-                    self.queue.push_back(current);
+                    let current = self.queue.pop_front_node().unwrap();
+                    self.queue.push_back_node(current);
+                    ThreadResponse::Nothing
                 },
-                ThreadRequest::Unschedule(func) => {
+                ThreadRequest::StageUnschedule => {
                     debug!("Requesting Unschedule");
-                    let node: Box<Node<Tcb>> = self.queue.pop_front_node().unwrap();
-                    func(node);
+                    // We have to pass `node` to a resume call on the tcb in node.
+                    // To do so, we need to get around the borrow checker.
+                    let mut node: &Box<Node<Tcb>> = self.queue.front_node().unwrap();
+                    let node_as_int: *const usize = unsafe { ::core::mem::transmute(node) };                        
+                    unsafe { ThreadResponse::Unscheduled(transmute(*node_as_int)) }
                 },
-                ThreadRequest::Schedule(tcb) => {
+                ThreadRequest::CompleteUnschedule => {
+                    debug!("Completing unschedule");
+                    // We can assert that last response was unscheduled
+                    // Finish unscheduling. Tcb's ownership has already been passed
+                    ::core::mem::forget(self.queue.pop_front_node());
+                    ThreadResponse::Nothing
+                },
+                ThreadRequest::Schedule(tcb_node) => {
                     debug!("Requesting schedule");
-                    self.queue.push_back(tcb);
+                    self.queue.push_back_node(tcb_node);
+                    ThreadResponse::Nothing
                 },
             },
-            None => {self.queue.pop_front();},
+            None => {
+                // Thread is finished.
+                // TODO(ryan): this will call the allocator. Fix so it doesn't.
+                self.queue.pop_front_node();
+                ThreadResponse::Nothing
+            },
         }
         
     }
@@ -101,12 +145,12 @@ impl Scheduler {
     }
   }
   
-  fn new_tcb<F>(func: F) -> Tcb where F: FnOnce() + Send + 'static {
+  fn new_tcb<F>(func: F) -> Box<Node<Tcb>> where F: FnOnce() + Send + 'static {
     const STACK_SIZE: usize = 1024 * 1024;
     let stack = fringe::OwnedStack::new(STACK_SIZE);
   
     unsafe {
-        Tcb { group: fringe_wrapper::Group::new(func, stack) }
+        box Node::new(Tcb { group: fringe_wrapper::Group::new(func, stack) })
     }
     
   }
@@ -133,9 +177,9 @@ impl Mutex {
     pub unsafe fn lock(&self) {
         cpu::current_cpu().disable_interrupts();
         while *self.taken.get() {
-            //get_scheduler().request(ThreadRequest::Unschedule(&|me: Box<Node<Tcb>>| {
-            //    (*self.sleepers.get()).push_back_node(me);
-            //}));
+            get_scheduler().do_and_unschedule(|tcb_node| {
+                (*self.sleepers.get()).push_back_node(tcb_node)
+            });
         }
         *self.taken.get() = true;
         cpu::current_cpu().enable_interrupts();
@@ -158,10 +202,10 @@ impl Mutex {
         cpu::current_cpu().disable_interrupts();
         assert!(*self.taken.get());
         *self.taken.get() = false;
-        //match (*self.sleepers.get()).pop_front() {
-        //    Some(tcb) => get_scheduler().request(ThreadRequest::Schedule(tcb)),
-        //    None => ()
-        //}
+        match (*self.sleepers.get()).pop_front_node() {
+            Some(tcb_node) => { get_scheduler().request(ThreadRequest::Schedule(tcb_node)); },
+            None => (),
+        }
         cpu::current_cpu().enable_interrupts();
     }
     
@@ -187,10 +231,10 @@ impl Condvar {
 
     pub unsafe fn notify_one(&self) {
         cpu::current_cpu().disable_interrupts();
-        //match (*self.sleepers.get()).pop_front() {
-        //    Some(tcb) => get_scheduler().request(ThreadRequest::Schedule(tcb)),
-        //    None => ()
-        //}
+        match (*self.sleepers.get()).pop_front_node() {
+            Some(tcb_node) => { get_scheduler().request(ThreadRequest::Schedule(tcb_node)); },
+            None => ()
+        }
         cpu::current_cpu().enable_interrupts();
     }
 
@@ -205,9 +249,9 @@ impl Condvar {
     pub unsafe fn wait(&self, mutex: &Mutex) {
         cpu::current_cpu().disable_interrupts();
         mutex.unlock();
-        //get_scheduler().get_scheduler().request(ThreadRequest::Unschedule(&|me: Box<Node<Tcb>>| { 
-        //    (*self.sleepers.get()).push_back_node(me);
-        //}));
+        get_scheduler().do_and_unschedule(|tcb_node| {
+            (*self.sleepers.get()).push_back_node(tcb_node)
+        });
         mutex.lock();
         cpu::current_cpu().enable_interrupts();
     }
@@ -251,32 +295,53 @@ impl RWLock {
 unsafe impl Send for ReentrantMutex {}
 unsafe impl Sync for ReentrantMutex {}
 
-pub struct ReentrantMutex;
+pub struct ReentrantMutex {
+    mutex: Mutex,
+    holder: Cell<Option<*const Tcb>>,
+}
 
 impl ReentrantMutex {
     pub unsafe fn uninitialized() -> ReentrantMutex {
-        unimplemented!();
+        ReentrantMutex { mutex: Mutex::new(), holder: Cell::new(None) }
+    }
+    
+    pub fn init(&self) { }
+
+    fn me(&self) -> *const Tcb {
+        get_scheduler().current_tcb() as *const Tcb
+    }
+    
+    fn has_lock(&self) -> bool {
+        self.holder.get().map(|ptr| { ptr == self.me()}) == Some(true)
+    }
+    
+    fn post_lock(&self) {
+        assert!(self.holder.get().is_none());
+        self.holder.set(Some(self.me()));
+    }
+    
+    pub unsafe fn lock(&self) {        
+        if !self.has_lock() {
+            self.mutex.lock();
+            self.post_lock();
+        }
     }
 
-    pub unsafe fn init(&mut self) {
-        unimplemented!();
-    }
-
-    pub unsafe fn lock(&self) {
-        unimplemented!();
-    }
-
-    #[inline]
     pub unsafe fn try_lock(&self) -> bool {
-        unimplemented!();
+        let locked = self.has_lock() || self.mutex.try_lock();
+        if locked {
+            self.post_lock();
+        }
+        locked
     }
 
     pub unsafe fn unlock(&self) {
-        unimplemented!();
+        assert!(self.has_lock());
+        self.holder.set(None);
+        self.mutex.unlock()
     }
 
     pub unsafe fn destroy(&self) {
-        unimplemented!();
     }
 }
 
