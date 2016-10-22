@@ -7,7 +7,10 @@ use core::ptr;
 use io;
 use time::Duration;
 
+use core_collections::String;
+
 use alloc::boxed::{Box, FnBox};
+use alloc::arc::Arc;
 
 use super::linked_list::{LinkedList, Node};
 
@@ -30,6 +33,7 @@ pub fn get_scheduler() -> &'static mut Scheduler {
 // thread control block
 struct Tcb {
   group: fringe_wrapper::Group<'static, ThreadResponse, ThreadRequest, fringe::OwnedStack>,
+  name: String,
 }
 
 unsafe impl Send for Tcb {}
@@ -58,6 +62,8 @@ pub struct Scheduler {
   queue: LinkedList<Tcb>,
 }
 
+const STACK_SIZE: usize = 1024*1024;
+
 impl Scheduler {
   
   fn new() -> Scheduler {
@@ -71,6 +77,8 @@ impl Scheduler {
   }
   
   fn do_and_unschedule<F>(&mut self, f: F) where F: FnOnce(Box<Node<Tcb>>) {
+    // TODO(ryan): determine if it's okay for this code to run in current
+    // thread rather than in scheduler
     let my_tcb = match self.request(ThreadRequest::StageUnschedule) {
         ThreadResponse::Unscheduled(x) => x,
         _ => unreachable!(),
@@ -83,13 +91,17 @@ impl Scheduler {
     self.queue.front().unwrap()
   }
   
+  fn current_tcb_mut(&mut self) -> &mut Tcb {
+    self.queue.front_mut().unwrap()
+  }
+  
   pub fn bootstrap_start<F>(f: F) -> ! where F: FnOnce() + Send + 'static {
-    get_scheduler().run(Self::new_tcb(f))
+    get_scheduler().run(Self::new_tcb(f, STACK_SIZE))
   }
   
   fn run(&mut self, start: Box<Node<Tcb>>) -> ! {
     // scheduler now takes control of the CPU
-    self.queue.push_front_node(Self::new_tcb(Self::idle));
+    self.queue.push_front_node(Self::new_tcb(Self::idle, STACK_SIZE));
     self.queue.push_front_node(start);
 
     let mut response = ThreadResponse::Nothing;
@@ -145,12 +157,11 @@ impl Scheduler {
     }
   }
   
-  fn new_tcb<F>(func: F) -> Box<Node<Tcb>> where F: FnOnce() + Send + 'static {
-    const STACK_SIZE: usize = 1024 * 1024;
-    let stack = fringe::OwnedStack::new(STACK_SIZE);
+  fn new_tcb<F>(func: F, stack_size: usize) -> Box<Node<Tcb>> where F: FnOnce() + Send + 'static {
+    let stack = fringe::OwnedStack::new(stack_size);
   
     unsafe {
-        box Node::new(Tcb { group: fringe_wrapper::Group::new(func, stack) })
+        box Node::new(Tcb { group: fringe_wrapper::Group::new(func, stack), name: String::new() })
     }
     
   }
@@ -338,14 +349,24 @@ impl ReentrantMutex {
     pub unsafe fn unlock(&self) {
         assert!(self.has_lock());
         self.holder.set(None);
-        self.mutex.unlock()
+        self.mutex.unlock();
     }
 
     pub unsafe fn destroy(&self) {
     }
 }
 
-pub struct Thread;
+struct RunningBarrier {
+    condvar: Condvar,
+    mutex: Mutex,
+    running: Cell<bool>,
+}
+    
+unsafe impl Sync for RunningBarrier {}
+
+pub struct Thread {
+    barrier: Arc<RunningBarrier>,
+}
 
 unsafe impl Send for Thread {}
 unsafe impl Sync for Thread {}
@@ -353,20 +374,43 @@ unsafe impl Sync for Thread {}
 impl Thread {
     pub unsafe fn new<'a>(stack: usize, p: Box<FnBox() + 'a>)
                           -> io::Result<Thread> {
-        unimplemented!();
+        let mut barrier = Arc::new(RunningBarrier {condvar: Condvar::new(), mutex: Mutex::new(), running: Cell::new(true) } );
+        let mut barrier_clone = barrier.clone();
+        let muted: Box<FnBox() + Send> = transmute(p);
+        let f = move || {
+            muted();
+            barrier_clone.mutex.lock();
+            barrier_clone.running.set(false);
+            barrier_clone.condvar.notify_all();
+            barrier_clone.mutex.unlock();
+        };
+        let tcb = Scheduler::new_tcb(f, stack);
+        get_scheduler().request(ThreadRequest::Schedule(tcb));
+        Ok(Thread { barrier: barrier } )
     }
 
     pub fn yield_now() {
+        get_scheduler().request(ThreadRequest::Yield);
     }
 
     #[cfg(any(target_os = "linux", target_os = "android"))]
     pub fn set_name(name: &str) {
+        get_scheduler().current_tcb_mut().name.clear();
+        get_scheduler().current_tcb_mut().name.push_str(name);
     }
 
     pub fn sleep(dur: Duration) {
+        unimplemented!();
     }
 
     pub fn join(self) {
+        unsafe {
+            self.barrier.mutex.lock();
+            while self.barrier.running.get() {
+                self.barrier.condvar.wait(&self.barrier.mutex);
+            }
+            self.barrier.mutex.unlock();
+        }
     }
 }
 
@@ -415,7 +459,7 @@ pub fn thread_stuff() {
     debug!("orig sched 0x{:x}", transmute_copy::<_, u32>(&s));
     //loop {};
     let t = || { test_thread() };
-    s.request(ThreadRequest::Schedule(Scheduler::new_tcb(t)));
+    s.request(ThreadRequest::Schedule(Scheduler::new_tcb(t, STACK_SIZE)));
     debug!("schedule okay");
     s.request(ThreadRequest::Yield);
     debug!("back");
