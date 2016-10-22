@@ -1,5 +1,3 @@
-// TODO(ryan): it really looks like bulk of libgreen could be used here where pthread <-> core
-
 use core::prelude::*;
 use core::cell::{UnsafeCell, Cell};
 use core::mem::{transmute, transmute_copy};
@@ -8,6 +6,7 @@ use io;
 use time::Duration;
 
 use core_collections::String;
+use core_collections::btree_map::BTreeMap;
 
 use alloc::boxed::{Box, FnBox};
 use alloc::arc::Arc;
@@ -34,6 +33,7 @@ pub fn get_scheduler() -> &'static mut Scheduler {
 struct Tcb {
   group: fringe_wrapper::Group<'static, ThreadResponse, ThreadRequest, fringe::OwnedStack>,
   name: String,
+  posix_local: BTreeMap<Key, *mut u8>,  // TODO(ryan): implement dtor calling in drop
 }
 
 unsafe impl Send for Tcb {}
@@ -161,7 +161,7 @@ impl Scheduler {
     let stack = fringe::OwnedStack::new(stack_size);
   
     unsafe {
-        box Node::new(Tcb { group: fringe_wrapper::Group::new(func, stack), name: String::new() })
+        box Node::new(Tcb { group: fringe_wrapper::Group::new(func, stack), name: String::new(), posix_local: BTreeMap::new() })
     }
     
   }
@@ -416,24 +416,31 @@ impl Thread {
 
 pub type Key = usize;
 
+pub struct KeyInner {
+    dtor: Option<unsafe extern fn(*mut u8)>,
+}
+
 #[inline]
 pub unsafe fn create(dtor: Option<unsafe extern fn(*mut u8)>) -> Key {
-    unimplemented!();
+    Box::into_raw(Box::new(KeyInner { dtor: dtor })) as usize
 }
 
 #[inline]
 pub unsafe fn set(key: Key, value: *mut u8) {
-    unimplemented!();
+    get_scheduler().current_tcb_mut().posix_local.insert(key, value);
 }
 
 #[inline]
 pub unsafe fn get(key: Key) -> *mut u8 {
-    unimplemented!();
+    match get_scheduler().current_tcb().posix_local.get(&key) {
+        Some(val) => *val,
+        None => 0 as *mut u8,
+    }
 }
 
 #[inline]
 pub unsafe fn destroy(key: Key) {
-    unimplemented!();
+    ::core::mem::drop(Box::from_raw(key as *mut KeyInner))
 }
 
 
