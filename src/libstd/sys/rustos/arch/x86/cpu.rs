@@ -18,7 +18,7 @@ pub fn current_cpu() -> &'static mut CPU {
     unsafe { transmute(CURRENT_CPU.get()) }
 }
 
-#[derive(Eq, PartialEq, Ord, PartialOrd, Copy, Clone)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Copy, Clone, Debug)]
 pub enum IRQ { // after remap
   Timer        = 0x20,
   PS2Keyboard  = 0x21,

@@ -36,6 +36,17 @@ struct Tcb {
   posix_local: BTreeMap<Key, *mut u8>,  // TODO(ryan): implement dtor calling in drop
 }
 
+impl Tcb {
+    
+    fn new<F>(func: F, stack_size: usize) -> Tcb where F: FnOnce() + Send + 'static {
+        let stack = fringe::OwnedStack::new(stack_size);
+        unsafe {
+            Tcb { group: fringe_wrapper::Group::new(func, stack), name: String::new(), posix_local: BTreeMap::new() }
+        }
+    }
+    
+}
+
 unsafe impl Send for Tcb {}
 
 // Request of thread to scheduler
@@ -44,12 +55,14 @@ enum ThreadRequest {
     StageUnschedule,                // Request to be unscheduled and get a Node container Tcb
     Schedule(Box<Node<Tcb>>),  // Schedule a Tcb
     CompleteUnschedule,                    // After unscheduling self, must send this message
+    Interrupted(cpu::IRQ),     // tell scheduler that thread has been interrupted by a cpu interrupt
 }
 
 // Response
 enum ThreadResponse {
     Nothing,
-    Unscheduled(Box<Node<Tcb>>)
+    Unscheduled(Box<Node<Tcb>>),
+    HandleIRQ(cpu::IRQ), // Tell thread to handle the given IRQ
 }
 
 // Notes that the scheduler thread cannot do any allocations (because
@@ -60,6 +73,8 @@ enum ThreadResponse {
 // memory pre-allocated to them.
 pub struct Scheduler {
   queue: LinkedList<Tcb>,
+  interrupt_handler: Arc<InterruptHandler>,
+  interrupt_handler_thread: Tcb,
 }
 
 const STACK_SIZE: usize = 1024*1024;
@@ -67,7 +82,12 @@ const STACK_SIZE: usize = 1024*1024;
 impl Scheduler {
   
   fn new() -> Scheduler {
-    let mut s = Scheduler { queue: LinkedList::new()  }; 
+    let handler = Arc::new(InterruptHandler::new());
+    let handler_clone = handler.clone();
+    let mut s = Scheduler { queue: LinkedList::new(),
+                            interrupt_handler: handler,
+                            interrupt_handler_thread: Tcb::new(move || {unsafe { handler_clone.run() }}, STACK_SIZE)
+    }; 
     s
   }
   
@@ -138,6 +158,10 @@ impl Scheduler {
                     self.queue.push_back_node(tcb_node);
                     ThreadResponse::Nothing
                 },
+                ThreadRequest::Interrupted(irq) => {
+                    unsafe { self.interrupt_handler_thread.group.resume(ThreadResponse::HandleIRQ(irq)); }
+                    ThreadResponse::Nothing
+                }
             },
             None => {
                 // Thread is finished.
@@ -158,15 +182,69 @@ impl Scheduler {
   }
   
   fn new_tcb<F>(func: F, stack_size: usize) -> Box<Node<Tcb>> where F: FnOnce() + Send + 'static {
-    let stack = fringe::OwnedStack::new(stack_size);
-  
-    unsafe {
-        box Node::new(Tcb { group: fringe_wrapper::Group::new(func, stack), name: String::new(), posix_local: BTreeMap::new() })
-    }
-    
+    box Node::new(Tcb::new(func, stack_size))
   }
   
-  
+}
+
+pub struct InterruptHandler {
+    mutex: Mutex,
+    irq_waiters: BTreeMap<cpu::IRQ, (Mutex, Condvar)>,
+}
+
+impl InterruptHandler {
+
+    pub fn new() -> InterruptHandler {
+        InterruptHandler { mutex: Mutex::new(), irq_waiters: BTreeMap::new() }
+    }
+    
+    pub fn thread_interrupted(irq: cpu::IRQ) {
+        // Called when a thread has been interrupted
+        
+        // Idea is to yield to the scheduler. Scheduler will then
+        // pass control to us in main_thread. Then, in main_thread,
+        // we wake any sleepers.
+        get_scheduler().request(ThreadRequest::Interrupted(irq));
+    }
+    
+    // Wait on the given IRQ
+    pub fn wait(&mut self, irq: cpu::IRQ) {
+        unsafe {
+            self.mutex.lock();
+            if !self.irq_waiters.contains_key(&irq) {
+                self.irq_waiters.insert(irq, (Mutex::new(), Condvar::new()));
+            }
+            let &(ref mutex, ref condvar) = match self.irq_waiters.get(&irq) {
+                Some(hit) => hit,
+                None => unreachable!(),
+            };
+            mutex.lock();
+            condvar.wait(&mutex);
+            mutex.unlock();
+            self.mutex.unlock();
+        }
+    }
+    
+    unsafe fn run(&self) {
+        loop {
+            let next_interrupt: cpu::IRQ = match  get_scheduler().request(ThreadRequest::Yield) {
+                ThreadResponse::HandleIRQ(irq) => irq,
+                _ =>  unreachable!(),
+            };
+            self.mutex.lock();
+            match self.irq_waiters.get(&next_interrupt) {
+                Some(&(ref mutex, ref condvar)) => {
+                    debug!("Waking sleepers on {:?}", next_interrupt);
+                    mutex.lock();
+                    condvar.notify_all();
+                    mutex.unlock();
+                },
+                None => (),
+            }
+            self.mutex.unlock();
+        }
+    }
+
 }
 
 unsafe impl Send for Mutex {}
