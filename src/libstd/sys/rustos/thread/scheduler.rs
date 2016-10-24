@@ -73,7 +73,7 @@ enum ThreadResponse {
 // memory pre-allocated to them.
 pub struct Scheduler {
   queue: LinkedList<Tcb>,
-  interrupt_handler: Arc<InterruptHandler>,
+  interrupt_handler: Box<InterruptHandler>,
   interrupt_handler_thread: Tcb,
 }
 
@@ -82,8 +82,10 @@ const STACK_SIZE: usize = 1024*1024;
 impl Scheduler {
   
   fn new() -> Scheduler {
-    let handler = Arc::new(InterruptHandler::new());
-    let handler_clone = handler.clone();
+    // TODO(ryan): This is kinda gross, fix it
+    let handler_raw = Box::into_raw(box InterruptHandler::new());
+    let handler = unsafe { Box::from_raw(handler_raw) };
+    let handler_clone = unsafe { Box::from_raw(handler_raw) };
     let mut s = Scheduler { queue: LinkedList::new(),
                             interrupt_handler: handler,
                             interrupt_handler_thread: Tcb::new(move || {unsafe { handler_clone.run() }}, STACK_SIZE)
@@ -93,7 +95,10 @@ impl Scheduler {
   
   fn request(&mut self, request: ThreadRequest) -> ThreadResponse {
     debug!("suspending");
-    unsafe { self.current_tcb().group.suspend(request) }
+    cpu::current_cpu().disable_interrupts();
+    let response = unsafe { self.current_tcb().group.suspend(request) };
+    cpu::current_cpu().enable_interrupts();
+    response
   }
   
   fn do_and_unschedule<F>(&mut self, f: F) where F: FnOnce(Box<Node<Tcb>>) {
@@ -113,6 +118,10 @@ impl Scheduler {
   
   fn current_tcb_mut(&mut self) -> &mut Tcb {
     self.queue.front_mut().unwrap()
+  }
+  
+  pub fn wait(&mut self, irq: cpu::IRQ) {
+    self.interrupt_handler.wait(irq);
   }
   
   pub fn bootstrap_start<F>(f: F) -> ! where F: FnOnce() + Send + 'static {

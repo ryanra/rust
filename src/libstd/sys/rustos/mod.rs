@@ -70,9 +70,7 @@ fn put_char(c: u8) {
 pub extern "C" fn main(magic: u32, info: usize) -> ! {
     // some preliminaries
     ::bump_ptr::set_allocator((15usize * 1024 * 1024) as *mut u8, (20usize * 1024 * 1024) as *mut u8);
-    let mut c = cpu::current_cpu();
-    unsafe { c.enable_interrupts(); }
-        
+    
     // we're going to now enter the scheduler to do the rest
     let bootstrapped_thunk = move || { 
         bootstrapped_main(magic, info as *mut multiboot_info); 
@@ -85,6 +83,7 @@ pub extern "C" fn main(magic: u32, info: usize) -> ! {
 fn bootstrapped_main(magic: u32, info: *mut multiboot_info) {
     unsafe {
         let mut c = cpu::current_cpu();
+        c.set_handler(scheduler::InterruptHandler::thread_interrupted);
         unsafe { c.enable_interrupts(); }
         c.make_keyboard(put_char);
         

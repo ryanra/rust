@@ -19,6 +19,7 @@ pub fn current_cpu() -> &'static mut CPU {
 }
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Copy, Clone, Debug)]
+#[repr(u8)]
 pub enum IRQ { // after remap
   Timer        = 0x20,
   PS2Keyboard  = 0x21,
@@ -38,6 +39,14 @@ pub enum IRQ { // after remap
   SecondaryAta = 0x2f
 }
 
+fn u8_to_irq(x: u8) -> Option<IRQ> {
+    if x >= IRQ::Timer as u8 && x <= IRQ::SecondaryAta as u8 {
+        Some(unsafe { transmute(x) })
+    } else {
+        None
+    }
+}
+
 extern "C" {
 
   fn interrupt();
@@ -50,7 +59,8 @@ extern "C" {
 pub struct CPU {
   gdt: GDT,
   idt: IDT,
-  keyboard: Option<Keyboard>
+  keyboard: Option<Keyboard>,
+  handler: Option<fn (IRQ) -> ()>,
   //ports: Ports
 }
 
@@ -68,20 +78,22 @@ impl CPU {
     let mut idt = IDT::new();
 
     idt.enable();
-    CPU { gdt: gdt, idt: idt, keyboard: None}
+    CPU { gdt: gdt, idt: idt, keyboard: None, handler: None }
   }
 
+  pub fn set_handler(&mut self, f: fn(IRQ) -> ()) {
+    self.handler = Some(f);
+  }
+  
   pub fn handle(&mut self, interrupt_number: u8) {
-    match interrupt_number {
-      0x06 => { warn!("ran illegal instruction!"); loop{}},
-      0x20 => (), // timer
-      0x21 => {
-        match &mut self.keyboard {
-            &mut Some(ref mut k) => k.got_interrupted(),
-            &mut None            => unsafe { debug("no keyboard installed", 0) }
-        }
-      },
-      _ => {debug!("interrupt with no handler: {}", interrupt_number); }
+    match self.handler {
+        Some(f) => {
+            match u8_to_irq(interrupt_number) {
+                Some(irq) => f(irq),
+                None => warn!("Unkonwn IRQ {}", interrupt_number),
+            }
+        },
+        None => warn!("No interrupt handler set!"),
     }
     self.acknowledge_irq(interrupt_number);
   }
