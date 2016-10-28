@@ -43,7 +43,7 @@ impl<'a, I, O, S: Stack> Group<'a, I, O, S> where I: Send + 'a, O: Send + 'a, S:
     
     // Unsafe because needs to be called in the right thread...
     pub unsafe fn suspend(&self, o: O) -> I {
-        info!("suspending to yielder at 0x{:x}", self.yielder as *const Yielder<_, _> as usize);
+        //info!("suspending to yielder at 0x{:x}", self.yielder as *const Yielder<_, _> as usize);
         self.yielder.suspend(o)
     }
 

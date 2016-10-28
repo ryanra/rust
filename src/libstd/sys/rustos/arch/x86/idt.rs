@@ -89,5 +89,19 @@ impl IDT {
   pub unsafe fn enable_interrupts() {
     asm!("sti" :::: "volatile");
   }
+  
+  #[stable(feature = "rustos", since = "0.0.1")]
+  pub fn interrupts_enabled() -> bool {
+    let eflags: u32;
+    unsafe {
+        asm!("pushfd\n
+            popl %eax"
+            :"={eax}"(eflags)
+            :
+            :
+            :"volatile");
+    }
+    (eflags >> 9 & 1) == 1
+  }
 
 }

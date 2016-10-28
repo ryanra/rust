@@ -7,8 +7,6 @@ use io::{self, Read, Write, Error};
 use super::idt::IDT;
 use super::gdt::GDT;
 
-use super::keyboard::Keyboard;
-
 // TODO remove box hack. It says it has a global destructor but I don't know why
 lazy_static! {
   pub static ref CURRENT_CPU: UnsafeCell<CPU> = UnsafeCell::new(unsafe { CPU::new() });
@@ -59,8 +57,7 @@ extern "C" {
 pub struct CPU {
   gdt: GDT,
   idt: IDT,
-  keyboard: Option<Keyboard>,
-  handler: Option<fn (IRQ) -> ()>,
+  handler: Option<Box<Fn(IRQ)>>,
   //ports: Ports
 }
 
@@ -78,24 +75,29 @@ impl CPU {
     let mut idt = IDT::new();
 
     idt.enable();
-    CPU { gdt: gdt, idt: idt, keyboard: None, handler: None }
+    CPU { gdt: gdt, idt: idt, handler: None }
   }
 
-  pub fn set_handler(&mut self, f: fn(IRQ) -> ()) {
+  pub fn set_handler(&mut self, f: Box<Fn(IRQ)>) {
     self.handler = Some(f);
   }
   
   pub fn handle(&mut self, interrupt_number: u8) {
-    match self.handler {
-        Some(f) => {
-            match u8_to_irq(interrupt_number) {
-                Some(irq) => f(irq),
-                None => warn!("Unkonwn IRQ {}", interrupt_number),
-            }
-        },
-        None => warn!("No interrupt handler set!"),
-    }
+    self.disable_interrupts();
+    //if false {
+        match self.handler {
+            Some(ref f) => {
+                match u8_to_irq(interrupt_number) {
+                    Some(irq) => { f(irq) },
+                    None => warn!("Unkonwn IRQ {}", interrupt_number),
+                }
+            },
+            None => warn!("No interrupt handler set!"),
+        }
+    //}
+    //info!("handling interrupt done {:?}", interrupt_number);
     self.acknowledge_irq(interrupt_number);
+    self.enable_interrupts();
   }
 
   pub unsafe fn register_irq(&mut self, irq: IRQ, handler: extern "C" fn () -> ()) {
@@ -110,11 +112,6 @@ impl CPU {
     PIC::master().control_port.out_b(interrupt_number); //TODO(ryan) ugly and only for master PIC
   }
 
-  pub fn make_keyboard(&mut self, callback: fn (u8) -> ()) {
-    self.keyboard = Some(Keyboard::new(callback, Port {port_number: 0x64}, Port {port_number: 0x60}));
-    //self.register_irq(Keyboard, )
-  }
-
   pub fn enable_interrupts(&mut self) {
     unsafe { IDT::enable_interrupts(); }
   }
@@ -126,7 +123,33 @@ impl CPU {
   pub unsafe fn test_interrupt(&mut self) {
     interrupt();
   }
+  
+  pub fn interrupts_enabled(&mut self) -> bool {
+    IDT::interrupts_enabled()
+  }
+  
+  pub fn interrupt_lock(&mut self) -> InterruptLock {
+    let already_enabled = IDT::interrupts_enabled();
 
+    self.disable_interrupts();
+    return InterruptLock{ should_enable: already_enabled }
+  }
+
+}
+
+struct InterruptLock {
+    should_enable: bool,
+}
+
+impl Drop for InterruptLock {
+    
+    fn drop(&mut self) {
+        if self.should_enable {
+            info!("should_enable is true: enabling ints");
+            current_cpu().enable_interrupts();
+        }
+    }
+    
 }
 
 pub extern "C" fn unified_handler(interrupt_number: u32) {

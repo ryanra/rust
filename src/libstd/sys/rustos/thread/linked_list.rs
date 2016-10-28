@@ -53,6 +53,7 @@ pub struct LinkedList<T> {
 pub type Link<T> = Option<Box<Node<T>>>;
 
 #[stable(feature = "rustos", since = "0.0.1")]
+#[derive(Debug)]
 pub struct Rawlink<T> {
     #[stable(feature = "rustos", since = "0.0.1")]
     pub p: *mut T,
@@ -66,6 +67,7 @@ unsafe impl<T:Send> Send for Rawlink<T> {}
 unsafe impl<T:Sync> Sync for Rawlink<T> {}
 
 #[stable(feature = "rustos", since = "0.0.1")]
+#[derive(Debug)]
 pub struct Node<T> {
     next: Link<T>,
     prev: Rawlink<Node<T>>,

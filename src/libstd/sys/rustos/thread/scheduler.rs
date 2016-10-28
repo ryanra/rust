@@ -55,7 +55,6 @@ enum ThreadRequest {
     StageUnschedule,                // Request to be unscheduled and get a Node container Tcb
     Schedule(Box<Node<Tcb>>),  // Schedule a Tcb
     CompleteUnschedule,                    // After unscheduling self, must send this message
-    Interrupted(cpu::IRQ),     // tell scheduler that thread has been interrupted by a cpu interrupt
 }
 
 // Response
@@ -73,8 +72,6 @@ enum ThreadResponse {
 // memory pre-allocated to them.
 pub struct Scheduler {
   queue: LinkedList<Tcb>,
-  interrupt_handler: Box<InterruptHandler>,
-  interrupt_handler_thread: Tcb,
 }
 
 const STACK_SIZE: usize = 1024*1024;
@@ -82,19 +79,11 @@ const STACK_SIZE: usize = 1024*1024;
 impl Scheduler {
   
   fn new() -> Scheduler {
-    // TODO(ryan): This is kinda gross, fix it
-    let handler_raw = Box::into_raw(box InterruptHandler::new());
-    let handler = unsafe { Box::from_raw(handler_raw) };
-    let handler_clone = unsafe { Box::from_raw(handler_raw) };
-    let mut s = Scheduler { queue: LinkedList::new(),
-                            interrupt_handler: handler,
-                            interrupt_handler_thread: Tcb::new(move || {unsafe { handler_clone.run() }}, STACK_SIZE)
-    }; 
-    s
+    Scheduler { queue: LinkedList::new() }
   }
   
   fn request(&mut self, request: ThreadRequest) -> ThreadResponse {
-    debug!("suspending");
+    //debug!("suspending");
     cpu::current_cpu().disable_interrupts();
     let response = unsafe { self.current_tcb().group.suspend(request) };
     cpu::current_cpu().enable_interrupts();
@@ -120,17 +109,17 @@ impl Scheduler {
     self.queue.front_mut().unwrap()
   }
   
-  pub fn wait(&mut self, irq: cpu::IRQ) {
-    self.interrupt_handler.wait(irq);
-  }
-  
   pub fn bootstrap_start<F>(f: F) -> ! where F: FnOnce() + Send + 'static {
     get_scheduler().run(Self::new_tcb(f, STACK_SIZE))
   }
   
-  fn run(&mut self, start: Box<Node<Tcb>>) -> ! {
+  fn run(&mut self, mut start: Box<Node<Tcb>>) -> ! {
     // scheduler now takes control of the CPU
-    self.queue.push_front_node(Self::new_tcb(Self::idle, STACK_SIZE));
+    let mut idle = Self::new_tcb(Self::idle, STACK_SIZE);
+    idle.value.name.push_str("idle thread");
+    self.queue.push_front_node(idle);
+    
+    start.value.name.push_str("main thread");
     self.queue.push_front_node(start);
 
     let mut response = ThreadResponse::Nothing;
@@ -138,11 +127,12 @@ impl Scheduler {
         let request = unsafe { 
             self.queue.front_mut().unwrap().group.resume(response) 
         };
-        debug!("got request");
+        //debug!("got request");
+        //debug!("Servicing request for ${:?}", self.queue.front().map(|t| { &t.name }));
         response = match request {
             Some(req) => match req {
                 ThreadRequest::Yield => {
-                    debug!("Requesting yield");
+                    //debug!("Requesting yield");
                     let current = self.queue.pop_front_node().unwrap();
                     self.queue.push_back_node(current);
                     ThreadResponse::Nothing
@@ -167,10 +157,6 @@ impl Scheduler {
                     self.queue.push_back_node(tcb_node);
                     ThreadResponse::Nothing
                 },
-                ThreadRequest::Interrupted(irq) => {
-                    unsafe { self.interrupt_handler_thread.group.resume(ThreadResponse::HandleIRQ(irq)); }
-                    ThreadResponse::Nothing
-                }
             },
             None => {
                 // Thread is finished.
@@ -179,14 +165,14 @@ impl Scheduler {
                 ThreadResponse::Nothing
             },
         }
+
         
     }
   }
   
   fn idle() {
-    get_scheduler().request(ThreadRequest::Yield);
     loop {
-        // TODO should idle and yield in here...
+        get_scheduler().request(ThreadRequest::Yield);
     }
   }
   
@@ -197,29 +183,32 @@ impl Scheduler {
 }
 
 pub struct InterruptHandler {
-    mutex: Mutex,
+    mutex: Mutex,  // used to signal to handler when interrupted
+    condvar: Condvar,
+    pending_irqs: Vec<cpu::IRQ>,
     irq_waiters: BTreeMap<cpu::IRQ, (Mutex, Condvar)>,
 }
 
 impl InterruptHandler {
 
     pub fn new() -> InterruptHandler {
-        InterruptHandler { mutex: Mutex::new(), irq_waiters: BTreeMap::new() }
+        InterruptHandler { mutex: Mutex::new(), condvar: Condvar::new(), irq_waiters: BTreeMap::new(), pending_irqs: Vec::new() }
     }
     
-    pub fn thread_interrupted(irq: cpu::IRQ) {
-        // Called when a thread has been interrupted
-        
-        // Idea is to yield to the scheduler. Scheduler will then
-        // pass control to us in main_thread. Then, in main_thread,
-        // we wake any sleepers.
-        get_scheduler().request(ThreadRequest::Interrupted(irq));
+    pub fn thread_interrupted(&mut self, irq: cpu::IRQ) {
+        unsafe {
+            self.pending_irqs.push(irq);
+            
+            self.mutex.lock();
+            self.condvar.notify_all();
+            self.mutex.unlock();
+        }
     }
     
     // Wait on the given IRQ
     pub fn wait(&mut self, irq: cpu::IRQ) {
         unsafe {
-            self.mutex.lock();
+            info!("waiting on irq {:?}", irq);
             if !self.irq_waiters.contains_key(&irq) {
                 self.irq_waiters.insert(irq, (Mutex::new(), Condvar::new()));
             }
@@ -227,28 +216,27 @@ impl InterruptHandler {
                 Some(hit) => hit,
                 None => unreachable!(),
             };
+            info!("locking mutex on irq {:?}", irq);
             mutex.lock();
             condvar.wait(&mutex);
             mutex.unlock();
-            self.mutex.unlock();
         }
     }
     
-    unsafe fn run(&self) {
+    unsafe fn run(&mut self) {
         loop {
-            let next_interrupt: cpu::IRQ = match  get_scheduler().request(ThreadRequest::Yield) {
-                ThreadResponse::HandleIRQ(irq) => irq,
-                _ =>  unreachable!(),
-            };
             self.mutex.lock();
-            match self.irq_waiters.get(&next_interrupt) {
-                Some(&(ref mutex, ref condvar)) => {
-                    debug!("Waking sleepers on {:?}", next_interrupt);
-                    mutex.lock();
-                    condvar.notify_all();
-                    mutex.unlock();
-                },
-                None => (),
+            self.condvar.wait(&self.mutex);
+            while let Some(irq) = self.pending_irqs.pop() {
+                match self.irq_waiters.get(&irq) {
+                    Some(&(ref mutex, ref condvar)) => {
+                        debug!("Waking sleepers on {:?}", irq);
+                        mutex.lock();
+                        condvar.notify_all();
+                        mutex.unlock();
+                    },
+                    None => (),
+                }
             }
             self.mutex.unlock();
         }
@@ -273,19 +261,19 @@ impl Mutex {
     pub unsafe fn init(&mut self) {}
 
     pub unsafe fn lock(&self) {
-        cpu::current_cpu().disable_interrupts();
+        let _lock = cpu::current_cpu().interrupt_lock();
         while *self.taken.get() {
+            info!("mutex taken!"); // NOTE: getting problem because mutex already taken by same thread... since we enable interrupts (during an interrupt handler)
             get_scheduler().do_and_unschedule(|tcb_node| {
                 (*self.sleepers.get()).push_back_node(tcb_node)
             });
         }
         *self.taken.get() = true;
-        cpu::current_cpu().enable_interrupts();
     }
     
     pub unsafe fn  try_lock(&self) -> bool {
         let mut ret;
-        cpu::current_cpu().disable_interrupts();
+        let _lock = cpu::current_cpu().interrupt_lock();
         if *self.taken.get() {
             ret = false
         } else {
@@ -297,14 +285,13 @@ impl Mutex {
     }
     
     pub unsafe fn unlock(&self) {
-        cpu::current_cpu().disable_interrupts();
+        let _lock = cpu::current_cpu().interrupt_lock();
         assert!(*self.taken.get());
         *self.taken.get() = false;
         match (*self.sleepers.get()).pop_front_node() {
             Some(tcb_node) => { get_scheduler().request(ThreadRequest::Schedule(tcb_node)); },
             None => (),
         }
-        cpu::current_cpu().enable_interrupts();
     }
     
     pub unsafe fn destroy(&self) {
@@ -328,30 +315,27 @@ impl Condvar {
     pub unsafe fn init(&mut self) {}
 
     pub unsafe fn notify_one(&self) {
-        cpu::current_cpu().disable_interrupts();
+        let _lock = cpu::current_cpu().interrupt_lock();
         match (*self.sleepers.get()).pop_front_node() {
             Some(tcb_node) => { get_scheduler().request(ThreadRequest::Schedule(tcb_node)); },
             None => ()
         }
-        cpu::current_cpu().enable_interrupts();
     }
 
     pub unsafe fn notify_all(&self) {
-        cpu::current_cpu().disable_interrupts();
+        let _lock = cpu::current_cpu().interrupt_lock();
         while !(*self.sleepers.get()).is_empty() {
             self.notify_one();
         }
-        cpu::current_cpu().enable_interrupts();
     }
 
     pub unsafe fn wait(&self, mutex: &Mutex) {
-        cpu::current_cpu().disable_interrupts();
+        let _lock = cpu::current_cpu().interrupt_lock();
         mutex.unlock();
         get_scheduler().do_and_unschedule(|tcb_node| {
             (*self.sleepers.get()).push_back_node(tcb_node)
         });
         mutex.lock();
-        cpu::current_cpu().enable_interrupts();
     }
     
     pub unsafe fn wait_timeout(&self, mutex: &Mutex, dur: Duration) -> bool {

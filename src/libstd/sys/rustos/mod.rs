@@ -8,6 +8,8 @@ use self::driver::DriverManager;
 use self::thread::scheduler;
 use fringe;
 
+use ::sync::{Arc, Mutex};
+
 #[macro_use]
 mod log;
 pub mod arch;
@@ -17,6 +19,7 @@ mod multiboot;
 mod pci;
 mod rtl8139;
 mod driver;
+mod keyboard;
 
 pub mod args;
 pub mod memchr;
@@ -63,13 +66,11 @@ fn test_allocator() {
 
 }
 
-fn put_char(c: u8) {
-  __print!("{}", c as char);
-}
-
 pub extern "C" fn main(magic: u32, info: usize) -> ! {
     // some preliminaries
     ::bump_ptr::set_allocator((15usize * 1024 * 1024) as *mut u8, (20usize * 1024 * 1024) as *mut u8);
+    
+    cpu::current_cpu().disable_interrupts();
     
     // we're going to now enter the scheduler to do the rest
     let bootstrapped_thunk = move || { 
@@ -83,9 +84,15 @@ pub extern "C" fn main(magic: u32, info: usize) -> ! {
 fn bootstrapped_main(magic: u32, info: *mut multiboot_info) {
     unsafe {
         let mut c = cpu::current_cpu();
-        c.set_handler(scheduler::InterruptHandler::thread_interrupted);
-        unsafe { c.enable_interrupts(); }
-        c.make_keyboard(put_char);
+        let handler = Arc::new(Mutex::new(scheduler::InterruptHandler::new()));
+        let hander_clone = handler.clone();
+        
+        c.set_handler(box move |irq| { 
+            //info!("handling irq {:?}", irq);
+            let mut lock = hander_clone.lock().unwrap();
+            //info!("handler locked {:?}", irq);
+            lock.thread_interrupted(irq);
+        });
         
         debug!("kernel main thread start!");
 
@@ -110,8 +117,20 @@ fn bootstrapped_main(magic: u32, info: *mut multiboot_info) {
         
         scheduler::thread_stuff();
         
+        
+        make_keyboard(handler.clone());
+        
         info!("Kernel main thread is done!");
+        //loop {}
   }
+}
+
+fn make_keyboard(handler: Arc<Mutex<scheduler::InterruptHandler>>) {
+    let wait = move || { handler.lock().unwrap().wait(cpu::IRQ::PS2Keyboard) };
+    let func = move || { keyboard::Keyboard::new(cpu::Port::new(0x64), cpu::Port::new(0x60), box wait).run() };
+    //let f2: Box<FnBox() + Send> = unsafe { ::core::mem::transmute(func) };
+    
+    unsafe { scheduler::Thread::new(1024*1024, box func) };
 }
 
 fn fringe_test() {

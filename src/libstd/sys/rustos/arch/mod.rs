@@ -4,7 +4,6 @@ pub use self::imp::{
   cpu,
   idt,
   gdt,
-  keyboard,
 };
 
 #[cfg(target_arch = "x86")]
@@ -15,5 +14,4 @@ mod imp {
   pub mod cpu;
   pub mod idt; // TODO shouldn't be pub
   pub mod gdt; // TODO shouldn't be pub
-  pub mod keyboard;
 }
