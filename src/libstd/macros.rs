@@ -33,6 +33,7 @@
 /// panic!(4); // panic with the value of 4 to be collected elsewhere
 /// panic!("this is a {} {message}", "fancy", message = "message");
 /// ```
+#[cfg(not(target_os = "rustos"))]
 #[macro_export]
 #[stable(feature = "rust1", since = "1.0.0")]
 #[allow_internal_unstable]

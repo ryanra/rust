@@ -1,6 +1,6 @@
 use super::terminal;
 
-//#[lang = "panic_fmt"] #[inline(never)] #[cold]
+#[lang = "panic_fmt"] #[inline(never)] #[cold]
 pub extern fn panic_impl(msg: ::core::fmt::Arguments,
                          file: &'static str,
                          line: usize) -> !

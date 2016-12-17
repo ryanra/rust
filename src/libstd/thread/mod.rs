@@ -158,10 +158,13 @@
 
 use any::Any;
 use cell::UnsafeCell;
+#[cfg(not(target_os = "rustos"))]
 use ffi::{CStr, CString};
 use fmt;
 use io;
+#[cfg(not(target_os = "rustos"))]
 use panic;
+#[cfg(not(target_os = "rustos"))]
 use panicking;
 use str;
 use sync::{Mutex, Condvar, Arc};
@@ -171,6 +174,11 @@ use sys_common::thread_info;
 use sys_common::util;
 use sys_common::{AsInner, IntoInner};
 use time::Duration;
+
+#[cfg(target_os = "rustos")]
+type CStr = &'static str;
+#[cfg(target_os = "rustos")]
+type CString = String;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Thread-local storage
@@ -560,9 +568,12 @@ pub struct Thread {
 impl Thread {
     // Used only internally to construct a thread object without spawning
     fn new(name: Option<String>) -> Thread {
+        #[cfg(not(target_os = "rustos"))]
         let cname = name.map(|n| {
             CString::new(n).expect("thread name may not contain interior null bytes")
         });
+        #[cfg(target_os = "rustos")]
+        let cname = name;
         Thread {
             inner: Arc::new(Inner {
                 name: cname,
@@ -625,9 +636,14 @@ impl Thread {
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn name(&self) -> Option<&str> {
-        self.cname().map(|s| unsafe { str::from_utf8_unchecked(s.to_bytes()) } )
+        #[cfg(not(target_os = "rustos"))]
+        return self.cname().map(|s| unsafe { str::from_utf8_unchecked(s.to_bytes()) } );
+
+        #[cfg(target_os = "rustos")]
+        return self.inner.name.as_ref().map(String::as_ref);
     }
 
+    #[cfg(not(target_os = "rustos"))]
     fn cname(&self) -> Option<&CStr> {
         self.inner.name.as_ref().map(|s| &**s)
     }

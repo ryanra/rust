@@ -8,7 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[cfg(not(feature = "rustos"))]
+#[cfg(not(target_os = "rustos"))]
 use env;
 use fmt;
 use io::prelude::*;
@@ -16,7 +16,7 @@ use sync::atomic::{self, Ordering};
 use sys::stdio::Stderr;
 use thread;
 
-#[cfg(not(feature = "rustos"))]
+#[cfg(not(target_os = "rustos"))]
 pub fn min_stack() -> usize {
     static MIN: atomic::AtomicUsize = atomic::AtomicUsize::new(0);
     match MIN.load(Ordering::SeqCst) {
@@ -31,7 +31,7 @@ pub fn min_stack() -> usize {
     amt
 }
 
-#[cfg(feature = "rustos")]
+#[cfg(target_os = "rustos")]
 pub fn min_stack() -> usize {
     unimplemented!();
 }
@@ -65,6 +65,11 @@ unsafe fn abort_internal() -> ! {
 unsafe fn abort_internal() -> ! {
     asm!("int $$0x29" :: "{ecx}"(7) ::: volatile); // 7 is FAST_FAIL_FATAL_APP_EXIT
     ::intrinsics::unreachable();
+}
+
+#[cfg(target_os = "rustos")]
+unsafe fn abort_internal() -> ! {
+  loop {}
 }
 
 // Other platforms should use the appropriate platform-specific mechanism for

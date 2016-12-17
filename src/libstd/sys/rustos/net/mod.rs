@@ -6,14 +6,12 @@ use alloc::boxed::Box;
 use super::driver::NetworkDriver;
 
 use io::Write;
-
+/*
 use io::{self, ErrorKind};
 use libc::{self, c_int, size_t};
 use num::One;
 use ops::Neg;
 use time::Duration;
-
-pub extern crate libc as netc;
 
 pub type wrlen_t = size_t;
 
@@ -76,7 +74,7 @@ impl Socket {
 pub fn init() {
     unimplemented!();
 }
-
+*/
 pub struct NetworkStack {
   card: Box<NetworkDriver + 'static>
 }

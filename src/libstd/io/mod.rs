@@ -267,11 +267,14 @@ pub use self::cursor::Cursor;
 pub use self::error::{Result, Error, ErrorKind};
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use self::util::{copy, sink, Sink, empty, Empty, repeat, Repeat};
+#[cfg(not(target_os="rustos"))]
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use self::stdio::{stdin, stdout, stderr, _print, Stdin, Stdout, Stderr};
+#[cfg(not(target_os="rustos"))]
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use self::stdio::{StdoutLock, StderrLock, StdinLock};
 #[unstable(feature = "libstd_io_internals", issue = "0")]
+#[cfg(not(target_os="rustos"))]
 #[doc(no_inline, hidden)]
 pub use self::stdio::{set_panic, set_print};
 
@@ -282,6 +285,7 @@ mod error;
 mod impls;
 mod lazy;
 mod util;
+#[cfg(not(target_os="rustos"))]
 mod stdio;
 
 const DEFAULT_BUF_SIZE: usize = 8 * 1024;

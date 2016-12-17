@@ -19,5 +19,6 @@ path = "../unicode"
 [dependencies.collections]
 path = "../collections"
 
-[dependencies.panic_unwind]
-path = "../src/libpanic_unwind"
+[dependencies.libc]
+path = "../../src/liblibc"
+default-features = false

@@ -24,18 +24,15 @@ mod keyboard;
 pub mod args;
 pub mod memchr;
 pub mod net;
-pub mod path;
 pub mod thread;
 pub mod time;
 pub mod stdio;
 pub mod pipe;
 pub mod os_str;
 pub mod backtrace;
-pub mod fs;
-pub mod process;
-pub mod os;
 pub mod rand;
 pub mod stack_overflow;
+pub mod env;
 
 pub mod mutex {
     pub use super::thread::scheduler::{Mutex, ReentrantMutex};
@@ -183,57 +180,16 @@ pub extern "C" fn callback() {
   debug!("    in an interrupt!");
 }
 
-// TODO(ryan): figure out what to do with these:
-/*
-#[lang = "stack_exhausted"]
-extern fn stack_exhausted() {}
-*/
-
-
-// for deriving
-//#[doc(hidden)]
-//mod std {
-//  pub use core::*;
-//}
-use io::{self, ErrorKind};
-use libc;
-
-pub fn decode_error_kind(errno: i32) -> ErrorKind {
-    match errno as libc::c_int {
-        libc::ECONNREFUSED => ErrorKind::ConnectionRefused,
-        libc::ECONNRESET => ErrorKind::ConnectionReset,
-        libc::EPERM | libc::EACCES => ErrorKind::PermissionDenied,
-        libc::EPIPE => ErrorKind::BrokenPipe,
-        libc::ENOTCONN => ErrorKind::NotConnected,
-        libc::ECONNABORTED => ErrorKind::ConnectionAborted,
-        libc::EADDRNOTAVAIL => ErrorKind::AddrNotAvailable,
-        libc::EADDRINUSE => ErrorKind::AddrInUse,
-        libc::ENOENT => ErrorKind::NotFound,
-        libc::EINTR => ErrorKind::Interrupted,
-        libc::EINVAL => ErrorKind::InvalidInput,
-        libc::ETIMEDOUT => ErrorKind::TimedOut,
-
-        // These two constants can have the same value on some systems,
-        // but different values on others, so we can't use a match
-        // clause
-        x if x == libc::EAGAIN || x == libc::EWOULDBLOCK =>
-            ErrorKind::WouldBlock,
-
-        _ => ErrorKind::Other,
-    }
-}
-
-
 pub fn init() {
     unimplemented!();
 }
 
 
 
-pub fn ms_to_timeval(ms: u64) -> libc::timeval {
-    libc::timeval {
-        tv_sec: (ms / 1000) as libc::time_t,
-        tv_usec: ((ms % 1000) * 1000) as libc::suseconds_t,
+pub fn ms_to_timeval(ms: u64) -> ::libc::timeval {
+    ::libc::timeval {
+        tv_sec: (ms / 1000) as ::libc::time_t,
+        tv_usec: ((ms % 1000) * 1000) as ::libc::suseconds_t,
     }
 }
 

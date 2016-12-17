@@ -60,7 +60,9 @@ pub struct Error {
     repr: Repr,
 }
 
+#[derive(Debug)]
 enum Repr {
+    #[cfg(not(target_os = "rustos"))]
     Os(i32),
     Custom(Box<Custom>),
 }
@@ -219,6 +221,7 @@ impl Error {
     ///
     /// println!("last OS error: {:?}", Error::last_os_error());
     /// ```
+    #[cfg(not(target_os = "rustos"))]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn last_os_error() -> Error {
         Error::from_raw_os_error(sys::os::errno() as i32)
@@ -249,6 +252,7 @@ impl Error {
     /// assert_eq!(error.kind(), io::ErrorKind::AddrInUse);
     /// # }
     /// ```
+    #[cfg(not(target_os = "rustos"))]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn from_raw_os_error(code: i32) -> Error {
         Error { repr: Repr::Os(code) }
@@ -280,6 +284,7 @@ impl Error {
     ///     print_os_error(&Error::new(ErrorKind::Other, "oh no!"));
     /// }
     /// ```
+    #[cfg(not(target_os = "rustos"))]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn raw_os_error(&self) -> Option<i32> {
         match self.repr {
@@ -316,6 +321,7 @@ impl Error {
     #[stable(feature = "io_error_inner", since = "1.3.0")]
     pub fn get_ref(&self) -> Option<&(error::Error+Send+Sync+'static)> {
         match self.repr {
+            #[cfg(not(target_os = "rustos"))]
             Repr::Os(..) => None,
             Repr::Custom(ref c) => Some(&*c.error),
         }
@@ -386,6 +392,7 @@ impl Error {
     #[stable(feature = "io_error_inner", since = "1.3.0")]
     pub fn get_mut(&mut self) -> Option<&mut (error::Error+Send+Sync+'static)> {
         match self.repr {
+            #[cfg(not(target_os = "rustos"))]
             Repr::Os(..) => None,
             Repr::Custom(ref mut c) => Some(&mut *c.error),
         }
@@ -419,6 +426,7 @@ impl Error {
     #[stable(feature = "io_error_inner", since = "1.3.0")]
     pub fn into_inner(self) -> Option<Box<error::Error+Send+Sync>> {
         match self.repr {
+            #[cfg(not(target_os = "rustos"))]
             Repr::Os(..) => None,
             Repr::Custom(c) => Some(c.error)
         }
@@ -445,12 +453,14 @@ impl Error {
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn kind(&self) -> ErrorKind {
         match self.repr {
+            #[cfg(not(target_os = "rustos"))]
             Repr::Os(code) => sys::decode_error_kind(code),
             Repr::Custom(ref c) => c.kind,
         }
     }
 }
 
+#[cfg(not(target_os = "rustos"))]
 impl fmt::Debug for Repr {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         match *self {
@@ -464,6 +474,7 @@ impl fmt::Debug for Repr {
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl fmt::Display for Error {
+    #[cfg(not(target_os = "rustos"))]
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         match self.repr {
             Repr::Os(code) => {
@@ -473,12 +484,18 @@ impl fmt::Display for Error {
             Repr::Custom(ref c) => c.error.fmt(fmt),
         }
     }
+
+    #[cfg(target_os = "rustos")]
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        Err(fmt::Error)
+    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl error::Error for Error {
     fn description(&self) -> &str {
         match self.repr {
+            #[cfg(not(target_os = "rustos"))]
             Repr::Os(..) => match self.kind() {
                 ErrorKind::NotFound => "entity not found",
                 ErrorKind::PermissionDenied => "permission denied",
@@ -506,6 +523,7 @@ impl error::Error for Error {
 
     fn cause(&self) -> Option<&error::Error> {
         match self.repr {
+            #[cfg(not(target_os = "rustos"))]
             Repr::Os(..) => None,
             Repr::Custom(ref c) => c.error.cause(),
         }

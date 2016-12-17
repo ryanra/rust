@@ -26,12 +26,13 @@ macro_rules! rtassert {
 }
 
 pub mod at_exit_imp;
-#[cfg(all(any(not(cargobuild), feature = "backtrace"), not(feature = "rustos")))]
+#[cfg(all(any(not(cargobuild), feature = "backtrace"), not(target_os = "rustos")))]
 pub mod backtrace;
 pub mod condvar;
 pub mod io;
 pub mod memchr;
 pub mod mutex;
+#[cfg(not(target_os = "rustos"))]
 pub mod net;
 pub mod poison;
 pub mod remutex;
