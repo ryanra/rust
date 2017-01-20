@@ -497,6 +497,7 @@ pub mod num;
 
 #[macro_use]
 pub mod thread;
+#[cfg(not(target_os="rustos"))]
 pub mod collections;
 #[cfg(not(target_os = "rustos"))]
 pub mod env;
@@ -507,6 +508,7 @@ pub mod fs;
 pub mod io;
 #[cfg(not(target_os = "rustos"))]
 pub mod net;
+#[cfg(not(target_os="rustos"))]
 pub mod os;
 #[cfg(not(target_os = "rustos"))]
 pub mod panic;
