@@ -169,7 +169,6 @@ use panicking;
 use str;
 use sync::{Mutex, Condvar, Arc};
 use sys::thread as imp;
-use sys_common::mutex;
 use sys_common::thread_info;
 use sys_common::util;
 use sys_common::{AsInner, IntoInner};
@@ -523,23 +522,23 @@ pub struct ThreadId(u64);
 impl ThreadId {
     // Generate a new unique thread ID.
     fn new() -> ThreadId {
-        static GUARD: mutex::Mutex = mutex::Mutex::new();
+        static GUARD: Mutex = Mutex::new();
         static mut COUNTER: u64 = 0;
 
         unsafe {
-            GUARD.lock();
+            let guard = GUARD.lock();
 
             // If we somehow use up all our bits, panic so that we're not
             // covering up subtle bugs of IDs being reused.
             if COUNTER == ::u64::MAX {
-                GUARD.unlock();
+                drop(guard);
                 panic!("failed to generate unique thread ID: bitspace exhausted");
             }
 
             let id = COUNTER;
             COUNTER += 1;
 
-            GUARD.unlock();
+            drop(guard);
 
             ThreadId(id)
         }

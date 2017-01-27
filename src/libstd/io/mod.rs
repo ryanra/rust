@@ -283,7 +283,7 @@ mod buffered;
 mod cursor;
 mod error;
 mod impls;
-mod lazy;
+//mod lazy;
 mod util;
 #[cfg(not(target_os="rustos"))]
 mod stdio;

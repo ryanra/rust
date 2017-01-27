@@ -5,10 +5,11 @@ use self::multiboot::multiboot_info;
 use self::arch::cpu;
 use self::pci::Pci;
 use self::driver::DriverManager;
-use self::thread::scheduler;
+use self::thread::Scheduler;
 use fringe;
 
-use ::sync::{Arc, Mutex};
+use ::alloc::arc::Arc;
+use self::thread::Mutex;
 
 #[macro_use]
 mod log;
@@ -25,30 +26,6 @@ pub mod args;
 pub mod memchr;
 pub mod net;
 pub mod thread;
-pub mod time;
-pub mod stdio;
-pub mod pipe;
-pub mod os_str;
-pub mod backtrace;
-pub mod rand;
-pub mod stack_overflow;
-pub mod env;
-
-pub mod mutex {
-    pub use super::thread::scheduler::{Mutex, ReentrantMutex};
-}
-
-pub mod rwlock {
-    pub use super::thread::scheduler::{RWLock};
-}
-
-pub mod condvar {
-    pub use super::thread::scheduler::{Condvar};
-}
-
-pub mod thread_local {
-    pub use super::thread::scheduler::{Key, create, set, get, destroy};
-}
 
 fn test_allocator() {
   let mut v = Vec::new();
@@ -74,14 +51,16 @@ pub extern "C" fn main(magic: u32, info: usize) -> ! {
         bootstrapped_main(magic, info as *mut multiboot_info); 
     };
     
-    scheduler::Scheduler::bootstrap_start(bootstrapped_thunk);
+    debug!("before bootstrap!\n\nwoooooooooooooooooooooooooooooooo!");
+    thread::start(bootstrapped_thunk);
     unreachable!();
 }
 
 fn bootstrapped_main(magic: u32, info: *mut multiboot_info) {
+    debug!("kernel main thread start!");
     unsafe {
         let mut c = cpu::current_cpu();
-        let handler = Arc::new(Mutex::new(scheduler::InterruptHandler::new()));
+        /*let handler = Arc::new(Mutex::new(scheduler::InterruptHandler::new()));
         let hander_clone = handler.clone();
         
         c.set_handler(box move |irq| { 
@@ -90,8 +69,9 @@ fn bootstrapped_main(magic: u32, info: *mut multiboot_info) {
             //info!("handler locked {:?}", irq);
             lock.thread_interrupted(irq);
         });
-        
+        */
         debug!("kernel main thread start!");
+        loop{}
 
         test_allocator();
         
@@ -112,23 +92,24 @@ fn bootstrapped_main(magic: u32, info: *mut multiboot_info) {
         
         fringe_test();
         
-        scheduler::thread_stuff();
+        //scheduler::thread_stuff();
         
         
-        make_keyboard(handler.clone());
+        //make_keyboard(handler.clone());
         
         info!("Kernel main thread is done!");
         //loop {}
   }
 }
 
+/*
 fn make_keyboard(handler: Arc<Mutex<scheduler::InterruptHandler>>) {
     let wait = move || { handler.lock().unwrap().wait(cpu::IRQ::PS2Keyboard) };
     let func = move || { keyboard::Keyboard::new(cpu::Port::new(0x64), cpu::Port::new(0x60), box wait).run() };
     //let f2: Box<FnBox() + Send> = unsafe { ::core::mem::transmute(func) };
     
     unsafe { scheduler::Thread::new(1024*1024, box func) };
-}
+}*/
 
 fn fringe_test() {
   let mut bytes: [u8; 5000] = [0; 5000];
@@ -183,13 +164,3 @@ pub extern "C" fn callback() {
 pub fn init() {
     unimplemented!();
 }
-
-
-
-pub fn ms_to_timeval(ms: u64) -> ::libc::timeval {
-    ::libc::timeval {
-        tv_sec: (ms / 1000) as ::libc::time_t,
-        tv_usec: ((ms % 1000) * 1000) as ::libc::suseconds_t,
-    }
-}
-

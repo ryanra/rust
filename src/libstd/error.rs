@@ -57,7 +57,6 @@ use char;
 use fmt::{self, Debug, Display};
 use marker::Reflect;
 use mem::transmute;
-use num;
 use str;
 use string;
 
@@ -222,27 +221,6 @@ impl Error for str::ParseBoolError {
 impl Error for str::Utf8Error {
     fn description(&self) -> &str {
         "invalid utf-8: corrupt contents"
-    }
-}
-
-#[stable(feature = "rust1", since = "1.0.0")]
-impl Error for num::ParseIntError {
-    fn description(&self) -> &str {
-        self.__description()
-    }
-}
-
-#[unstable(feature = "try_from", issue = "33417")]
-impl Error for num::TryFromIntError {
-    fn description(&self) -> &str {
-        self.__description()
-    }
-}
-
-#[stable(feature = "rust1", since = "1.0.0")]
-impl Error for num::ParseFloatError {
-    fn description(&self) -> &str {
-        self.__description()
     }
 }
 

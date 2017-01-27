@@ -317,57 +317,6 @@ extern crate collections as core_collections;
 extern crate alloc;
 extern crate rustc_unicode;
 
-#[cfg(not(target_os="rustos"))]
-extern crate libc;
-
-#[cfg(target_os="rustos")]
-mod libc {
-  pub type int8_t = i8;
-  pub type int16_t = i16;
-  pub type int32_t = i32;
-  pub type int64_t = i64;
-  pub type uint8_t = u8;
-  pub type uint16_t = u16;
-  pub type uint32_t = u32;
-  pub type uint64_t = u64;
-
-  pub type c_schar = i8;
-  pub type c_uchar = u8;
-  pub type c_short = i16;
-  pub type c_ushort = u16;
-  pub type c_int = i32;
-  pub type c_uint = u32;
-  pub type c_float = f32;
-  pub type c_double = f64;
-  pub type c_longlong = i64;
-  pub type c_ulonglong = u64;
-  pub type intmax_t = i64;
-  pub type uintmax_t = u64;
-
-  pub type size_t = usize;
-  pub type ptrdiff_t = isize;
-  pub type intptr_t = isize;
-  pub type uintptr_t = usize;
-  pub type ssize_t = isize;
-
-  pub type c_void = usize;
-  pub type c_long = i64;
-
-  #[derive(Copy, Clone)]
-  pub struct timespec {
-    pub tv_sec: time_t,
-    pub tv_nsec: c_long,
-  }
-
-  pub struct timeval {
-    pub tv_sec: time_t,
-    pub tv_usec: c_long,
-  }
-  pub type time_t = u64;
-  pub type suseconds_t = i64;
-
-}
-
 // We always need an unwinder currently for backtraces
 //extern crate unwind;
 
@@ -484,44 +433,22 @@ pub use core::u32;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::u64;
 
-#[path = "num/f32.rs"]   pub mod f32;
-#[path = "num/f64.rs"]   pub mod f64;
+//#[path = "num/f32.rs"]   pub mod f32;
+//#[path = "num/f64.rs"]   pub mod f64;
 
 pub mod ascii;
 
 /* Common traits */
 
-pub mod num;
+//pub mod num;
 
 /* Runtime and platform support */
 
-#[macro_use]
-pub mod thread;
-#[cfg(not(target_os="rustos"))]
-pub mod collections;
-#[cfg(not(target_os = "rustos"))]
-pub mod env;
-#[cfg(not(target_os = "rustos"))]
-pub mod ffi;
-#[cfg(not(target_os = "rustos"))]
-pub mod fs;
 pub mod io;
-#[cfg(not(target_os = "rustos"))]
-pub mod net;
-#[cfg(not(target_os="rustos"))]
-pub mod os;
-#[cfg(not(target_os = "rustos"))]
-pub mod panic;
-#[cfg(not(target_os = "rustos"))]
-pub mod path;
-#[cfg(not(target_os = "rustos"))]
-pub mod process;
-pub mod sync;
-pub mod time;
 mod memchr;
 
-#[macro_use]
-#[path = "sys/common/mod.rs"] mod sys_common;
+//#[macro_use]
+//#[path = "sys/common/mod.rs"] mod sys_common;
 
 #[cfg(all(unix, not(feature = "rustos")))]
 #[path = "sys/unix/mod.rs"] mod sys;
@@ -534,18 +461,6 @@ mod memchr;
 pub mod rt;
 #[cfg(not(target_os = "rustos"))]
 mod panicking;
-mod rand;
-
-// Some external utilities of the standard library rely on randomness (aka
-// rustc_back::TempDir and tests) and need a way to get at the OS rng we've got
-// here. This module is not at all intended for stabilization as-is, however,
-// but it may be stabilized long-term. As a result we're exposing a hidden,
-// unstable module so we can get our build working.
-#[doc(hidden)]
-#[unstable(feature = "rand", issue = "0")]
-pub mod __rand {
-    pub use rand::{thread_rng, ThreadRng, Rng};
-}
 
 // Include a number of private modules that exist solely to provide
 // the rustdoc documentation for primitive types. Using `include!`

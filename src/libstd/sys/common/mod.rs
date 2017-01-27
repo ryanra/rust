@@ -28,14 +28,18 @@ macro_rules! rtassert {
 pub mod at_exit_imp;
 #[cfg(all(any(not(cargobuild), feature = "backtrace"), not(target_os = "rustos")))]
 pub mod backtrace;
+#[cfg(not(target_os = "rustos"))]
 pub mod condvar;
 pub mod io;
 pub mod memchr;
+#[cfg(not(target_os = "rustos"))]
 pub mod mutex;
 #[cfg(not(target_os = "rustos"))]
 pub mod net;
 pub mod poison;
+#[cfg(not(target_os = "rustos"))]
 pub mod remutex;
+#[cfg(not(target_os = "rustos"))]
 pub mod rwlock;
 pub mod thread;
 pub mod thread_info;
@@ -84,11 +88,13 @@ pub trait FromInner<Inner> {
 /// closure will be run once the main thread exits. Returns `Err` to indicate
 /// that the closure could not be registered, meaning that it is not scheduled
 /// to be run.
+#[cfg(not(target_os = "rustos"))]
 pub fn at_exit<F: FnOnce() + Send + 'static>(f: F) -> Result<(), ()> {
     if at_exit_imp::push(Box::new(f)) {Ok(())} else {Err(())}
 }
 
 /// One-time runtime cleanup.
+#[cfg(not(target_os = "rustos"))]
 pub fn cleanup() {
     static CLEANUP: Once = Once::new();
     CLEANUP.call_once(|| unsafe {

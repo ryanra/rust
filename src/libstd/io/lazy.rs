@@ -8,15 +8,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use cell::Cell;
-use ptr;
-use sync::Arc;
-use sys_common;
-use sys_common::mutex::Mutex;
+use sync::{Arc, Mutex};
 
 pub struct Lazy<T> {
-    lock: Mutex,
-    ptr: Cell<*mut Arc<T>>,
+    data: Arc<Mutex<Option<Arc<T>>>>,
     init: fn() -> Arc<T>,
 }
 
@@ -25,44 +20,22 @@ unsafe impl<T> Sync for Lazy<T> {}
 impl<T: Send + Sync + 'static> Lazy<T> {
     pub const fn new(init: fn() -> Arc<T>) -> Lazy<T> {
         Lazy {
-            lock: Mutex::new(),
-            ptr: Cell::new(ptr::null_mut()),
+            data: Arc::new(Mutex::new(None)),
             init: init
         }
     }
 
     pub fn get(&'static self) -> Option<Arc<T>> {
-        unsafe {
-            self.lock.lock();
-            let ptr = self.ptr.get();
-            let ret = if ptr.is_null() {
-                Some(self.init())
-            } else if ptr as usize == 1 {
-                None
-            } else {
-                Some((*ptr).clone())
-            };
-            self.lock.unlock();
-            return ret
-        }
+      let mut maybe_data = self.data.lock().unwrap();
+      let result: Arc<T> = match maybe_data {
+        None => {
+          let res = (self.init)();
+          *maybe_data = res;
+          res
+        },
+        Some(res) => res,
+      };
+      Some(result)
     }
 
-    unsafe fn init(&'static self) -> Arc<T> {
-        // If we successfully register an at exit handler, then we cache the
-        // `Arc` allocation in our own internal box (it will get deallocated by
-        // the at exit handler). Otherwise we just return the freshly allocated
-        // `Arc`.
-        let registered = sys_common::at_exit(move || {
-            self.lock.lock();
-            let ptr = self.ptr.get();
-            self.ptr.set(1 as *mut _);
-            self.lock.unlock();
-            drop(Box::from_raw(ptr))
-        });
-        let ret = (self.init)();
-        if registered.is_ok() {
-            self.ptr.set(Box::into_raw(Box::new(ret.clone())));
-        }
-        ret
-    }
 }

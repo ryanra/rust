@@ -14,7 +14,7 @@
 
 use alloc::boxed::FnBox;
 use ptr;
-use sys_common::mutex::Mutex;
+use sync::Mutex;
 
 type Queue = Vec<Box<FnBox()>>;
 

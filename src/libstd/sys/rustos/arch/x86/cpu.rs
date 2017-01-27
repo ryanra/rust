@@ -92,7 +92,7 @@ impl CPU {
                     None => warn!("Unkonwn IRQ {}", interrupt_number),
                 }
             },
-            None => warn!("No interrupt handler set!"),
+            None => (), //warn!("No interrupt handler set!"),
         }
     //}
     //info!("handling interrupt done {:?}", interrupt_number);
