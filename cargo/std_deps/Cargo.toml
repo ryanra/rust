@@ -1,0 +1,19 @@
+[package]
+name = "std_deps"
+version = "0.1.0"
+authors = ["Ryan Rasti <ryanrasti@gmail.com>"]
+
+[dependencies.core]
+path = "../core"
+
+[dependencies.alloc]
+path = "../alloc"
+
+[dependencies.rand]
+path = "../rand"
+
+[dependencies.rustc_unicode]
+path = "../unicode"
+
+[dependencies.collections]
+path = "../collections"
