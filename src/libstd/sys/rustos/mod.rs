@@ -10,6 +10,9 @@ use fringe;
 
 use ::alloc::arc::Arc;
 use self::thread::Mutex;
+use self::interrupt_handler::InterruptHandler;
+
+mod interrupt_handler;
 
 #[macro_use]
 mod log;
@@ -51,27 +54,24 @@ pub extern "C" fn main(magic: u32, info: usize) -> ! {
         bootstrapped_main(magic, info as *mut multiboot_info); 
     };
     
-    debug!("before bootstrap!\n\nwoooooooooooooooooooooooooooooooo!");
     thread::start(bootstrapped_thunk);
     unreachable!();
 }
 
 fn bootstrapped_main(magic: u32, info: *mut multiboot_info) {
     debug!("kernel main thread start!");
+    let handlers = Arc::new((0..0x30).map(|_| Arc::new(InterruptHandler::new())).collect::<Vec<_>>());
+
     unsafe {
         let mut c = cpu::current_cpu();
-        /*let handler = Arc::new(Mutex::new(scheduler::InterruptHandler::new()));
-        let hander_clone = handler.clone();
         
+        let mut handlers_clone = handlers.clone();
         c.set_handler(box move |irq| { 
-            //info!("handling irq {:?}", irq);
-            let mut lock = hander_clone.lock().unwrap();
-            //info!("handler locked {:?}", irq);
-            lock.thread_interrupted(irq);
+            let ref lock = handlers_clone[irq as usize];
+            lock.notify();
         });
-        */
-        debug!("kernel main thread start!");
-        loop{}
+
+        cpu::current_cpu().enable_interrupts();
 
         test_allocator();
         
@@ -83,33 +83,37 @@ fn bootstrapped_main(magic: u32, info: *mut multiboot_info) {
             (*info).multiboot_stuff();
         }
         
-        
+
         debug!("Going to interrupt: ");
-        cpu::current_cpu().test_interrupt();
+        //cpu::current_cpu().test_interrupt();
         debug!("    back from interrupt!");
-        
+
+
         pci_stuff();
-        
+
+
+
         fringe_test();
         
         //scheduler::thread_stuff();
         
         
-        //make_keyboard(handler.clone());
+        make_keyboard(handlers[cpu::IRQ::PS2Keyboard as usize].clone());
         
         info!("Kernel main thread is done!");
-        //loop {}
+        loop {
+          thread::yield_now();
+        }
   }
 }
 
-/*
-fn make_keyboard(handler: Arc<Mutex<scheduler::InterruptHandler>>) {
-    let wait = move || { handler.lock().unwrap().wait(cpu::IRQ::PS2Keyboard) };
-    let func = move || { keyboard::Keyboard::new(cpu::Port::new(0x64), cpu::Port::new(0x60), box wait).run() };
+
+fn make_keyboard(handler: Arc<InterruptHandler>) {
+    let func = move || { keyboard::Keyboard::new(cpu::Port::new(0x64), cpu::Port::new(0x60), handler).run() };
     //let f2: Box<FnBox() + Send> = unsafe { ::core::mem::transmute(func) };
     
-    unsafe { scheduler::Thread::new(1024*1024, box func) };
-}*/
+    unsafe { self::thread::spawn(func, 1024*1024) };
+}
 
 fn fringe_test() {
   let mut bytes: [u8; 5000] = [0; 5000];

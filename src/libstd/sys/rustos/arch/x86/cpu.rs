@@ -89,13 +89,12 @@ impl CPU {
             Some(ref f) => {
                 match u8_to_irq(interrupt_number) {
                     Some(irq) => { f(irq) },
-                    None => warn!("Unkonwn IRQ {}", interrupt_number),
+                    None => (),//warn!("Unkonwn IRQ {}", interrupt_number),
                 }
             },
             None => (), //warn!("No interrupt handler set!"),
         }
     //}
-    //info!("handling interrupt done {:?}", interrupt_number);
     self.acknowledge_irq(interrupt_number);
     self.enable_interrupts();
   }
